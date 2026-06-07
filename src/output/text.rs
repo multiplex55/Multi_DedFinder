@@ -65,6 +65,57 @@ pub fn render_route(route: &GeneratedRoute) -> Result<String> {
     Ok(output)
 }
 
+pub fn render_routes(routes: &[GeneratedRoute]) -> Result<String> {
+    let mut output = String::new();
+    writeln!(output, "{TITLE} - all modes")?;
+    writeln!(output, "============================")?;
+    writeln!(output, "Routes generated: {}", routes.len())?;
+    writeln!(
+        output,
+        "Data sources: public ESI activity data and static/local SDE data only; no live anomaly detection, probe scanner parsing, UI automation, in-client clicking, or EVE client process interaction."
+    )?;
+
+    for route in routes {
+        writeln!(output)?;
+        writeln!(output, "{} summary", route.mode)?;
+        writeln!(output, "{}", "-".repeat(route.mode.to_string().len() + 8))?;
+        writeln!(
+            output,
+            "Start system: {} ({})",
+            route.start_system, route.start_system_id
+        )?;
+        writeln!(output, "Waypoint count: {}", route.waypoints.len())?;
+        writeln!(output, "Total route jumps: {}", route.total_jumps)?;
+        writeln!(output, "Average score: {:.4}", route.average_score)?;
+        let names = route
+            .waypoints
+            .iter()
+            .map(|waypoint| waypoint.system_name.as_str())
+            .collect::<Vec<_>>()
+            .join(" -> ");
+        writeln!(
+            output,
+            "Waypoints: {}",
+            if names.is_empty() { "none" } else { &names }
+        )?;
+    }
+
+    validate_route_output_claims(&output)?;
+    Ok(output)
+}
+
+pub fn write_routes(routes: &[GeneratedRoute], path: impl AsRef<Path>) -> Result<()> {
+    let rendered = render_routes(routes)?;
+    fs::write(path, rendered)?;
+    Ok(())
+}
+
+pub fn print_routes(routes: &[GeneratedRoute]) -> Result<()> {
+    let rendered = render_routes(routes)?;
+    print!("{rendered}");
+    Ok(())
+}
+
 pub fn write_route(route: &GeneratedRoute, path: impl AsRef<Path>) -> Result<()> {
     let rendered = render_route(route)?;
     fs::write(path, rendered)?;

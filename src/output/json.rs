@@ -7,6 +7,11 @@ use serde::Serialize;
 use crate::model::route::GeneratedRoute;
 use crate::output::text::validate_route_output_claims;
 
+#[derive(Debug, Serialize)]
+pub struct GeneratedRoutes<'a> {
+    pub routes: &'a [GeneratedRoute],
+}
+
 pub fn to_pretty_json<T: Serialize>(value: &T) -> Result<String> {
     Ok(serde_json::to_string_pretty(value)?)
 }
@@ -17,8 +22,19 @@ pub fn render_route(route: &GeneratedRoute) -> Result<String> {
     Ok(rendered)
 }
 
+pub fn render_routes(routes: &[GeneratedRoute]) -> Result<String> {
+    let rendered = to_pretty_json(&GeneratedRoutes { routes })?;
+    validate_route_output_claims(&rendered)?;
+    Ok(rendered)
+}
+
 pub fn write_route(route: &GeneratedRoute, path: impl AsRef<Path>) -> Result<()> {
     fs::write(path, render_route(route)?)?;
+    Ok(())
+}
+
+pub fn write_routes(routes: &[GeneratedRoute], path: impl AsRef<Path>) -> Result<()> {
+    fs::write(path, render_routes(routes)?)?;
     Ok(())
 }
 

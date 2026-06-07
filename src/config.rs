@@ -386,6 +386,7 @@ highsec_only = false
             max_distance: Some(50),
             highsec_only: Some(true),
             mode: Some(RouteMode::UltraQuiet),
+            all_modes: None,
             output: Some(PathBuf::from("/tmp/route.txt")),
             json: Some(PathBuf::from("/tmp/route.json")),
             push_waypoints: Some(true),
