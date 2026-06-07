@@ -69,6 +69,22 @@ pub struct CliOptions {
     /// Do not prefer routes that return to the start system.
     #[arg(long, action = ArgAction::SetTrue)]
     pub no_prefer_loop: Option<bool>,
+
+    /// EVE character ID to authenticate and push waypoints for.
+    #[arg(long)]
+    pub character_id: Option<i64>,
+
+    /// EVE character name to show in prompts and validation messages.
+    #[arg(long)]
+    pub character_name: Option<String>,
+
+    /// Skip confirmation prompts.
+    #[arg(long, action = ArgAction::SetTrue)]
+    pub yes: Option<bool>,
+
+    /// Print what would be pushed without calling ESI.
+    #[arg(long, action = ArgAction::SetTrue)]
+    pub dry_run: Option<bool>,
 }
 
 impl CliOptions {
