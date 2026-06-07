@@ -7,9 +7,10 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::model::score::ScoreBreakdown;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, ValueEnum)]
 pub enum RouteMode {
     UltraQuiet,
+    #[default]
     DenseQuiet,
     Sweep,
 }
@@ -21,12 +22,6 @@ impl RouteMode {
             Self::DenseQuiet => "dense_quiet",
             Self::Sweep => "sweep",
         }
-    }
-}
-
-impl Default for RouteMode {
-    fn default() -> Self {
-        Self::DenseQuiet
     }
 }
 

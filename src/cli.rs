@@ -36,6 +36,10 @@ pub struct CliOptions {
     #[arg(long)]
     pub start: Option<String>,
 
+    /// Path to prepared local SDE-derived data files.
+    #[arg(long)]
+    pub sde_path: Option<PathBuf>,
+
     /// Number of waypoints to generate.
     #[arg(long)]
     pub waypoints: Option<usize>,
