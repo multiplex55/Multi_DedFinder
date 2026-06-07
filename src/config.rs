@@ -5,6 +5,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::cli::CliOptions;
+use crate::data::route_history::DEFAULT_ROUTE_HISTORY_PATH;
 use crate::model::route::RouteMode;
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
@@ -43,6 +44,10 @@ pub struct RouteConfig {
     pub push_waypoints: bool,
     pub prefer_loop: bool,
     pub trade_hub_radius: u32,
+    pub route_history_enabled: bool,
+    pub route_history_path: Option<PathBuf>,
+    pub route_history_last_route_only: bool,
+    pub ignore_malformed_route_history: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -169,6 +174,10 @@ impl Default for RouteConfig {
             push_waypoints: false,
             prefer_loop: true,
             trade_hub_radius: 3,
+            route_history_enabled: true,
+            route_history_path: Some(PathBuf::from(DEFAULT_ROUTE_HISTORY_PATH)),
+            route_history_last_route_only: true,
+            ignore_malformed_route_history: false,
         }
     }
 }
@@ -259,6 +268,13 @@ mod tests {
         assert!(!config.esi.allow_stale_activity_cache);
         assert_eq!(config.route.mode, RouteMode::DenseQuiet);
         assert_eq!(config.route.trade_hub_radius, 3);
+        assert!(config.route.route_history_enabled);
+        assert_eq!(
+            config.route.route_history_path.as_deref(),
+            Some(Path::new(DEFAULT_ROUTE_HISTORY_PATH))
+        );
+        assert!(config.route.route_history_last_route_only);
+        assert!(!config.route.ignore_malformed_route_history);
     }
 
     #[test]
@@ -279,6 +295,10 @@ output = "json"
 push_waypoints = true
 prefer_loop = false
 trade_hub_radius = 5
+route_history_enabled = false
+route_history_path = "/tmp/eve-route-history.json"
+route_history_last_route_only = true
+ignore_malformed_route_history = true
 
 [filter]
 highsec_only = false
@@ -315,6 +335,13 @@ allow_stale_activity_cache = true
         assert!(config.route.push_waypoints);
         assert!(!config.route.prefer_loop);
         assert_eq!(config.route.trade_hub_radius, 5);
+        assert!(!config.route.route_history_enabled);
+        assert_eq!(
+            config.route.route_history_path.as_deref(),
+            Some(Path::new("/tmp/eve-route-history.json"))
+        );
+        assert!(config.route.route_history_last_route_only);
+        assert!(config.route.ignore_malformed_route_history);
         assert!(!config.filter.highsec_only);
         assert_eq!(config.filter.min_security_status, 0.6);
         assert_eq!(config.weights.activity, 2.0);

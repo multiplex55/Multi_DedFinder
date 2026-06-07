@@ -20,6 +20,16 @@ pub fn filter_candidates(
     activity: &HashMap<i32, SystemActivity>,
     config: &AppConfig,
 ) -> Vec<ScoredSystem> {
+    filter_candidates_with_route_history(graph, start_system_id, activity, config, &HashSet::new())
+}
+
+pub fn filter_candidates_with_route_history(
+    graph: &HighsecGraph,
+    start_system_id: i32,
+    activity: &HashMap<i32, SystemActivity>,
+    config: &AppConfig,
+    route_history: &HashSet<i32>,
+) -> Vec<ScoredSystem> {
     if !graph.contains_system(start_system_id) {
         return Vec::new();
     }
@@ -69,7 +79,7 @@ pub fn filter_candidates(
                 graph,
                 config,
                 config.route.mode,
-                &HashSet::new(),
+                route_history,
             );
             scored.distance_from_start = distance_from_start;
 
@@ -421,5 +431,41 @@ mod tests {
         assert!(candidates
             .iter()
             .all(|candidate| candidate.jumps_last_hour == 0));
+    }
+
+    #[test]
+    fn systems_from_last_route_receive_reuse_penalty() {
+        let graph = graph();
+        let candidates = filter_candidates_with_route_history(
+            &graph,
+            1,
+            &activity_map([activity(2), activity(3)]),
+            &config(),
+            &HashSet::from([2]),
+        );
+
+        let reused = candidates
+            .iter()
+            .find(|candidate| candidate.system_id == 2)
+            .expect("reused system should be a candidate");
+        assert_eq!(reused.score_breakdown.reuse_penalty, 1.0);
+    }
+
+    #[test]
+    fn unrelated_systems_do_not_receive_reuse_penalty() {
+        let graph = graph();
+        let candidates = filter_candidates_with_route_history(
+            &graph,
+            1,
+            &activity_map([activity(2), activity(3)]),
+            &config(),
+            &HashSet::from([2]),
+        );
+
+        let unrelated = candidates
+            .iter()
+            .find(|candidate| candidate.system_id == 3)
+            .expect("unrelated system should be a candidate");
+        assert_eq!(unrelated.score_breakdown.reuse_penalty, 0.0);
     }
 }
