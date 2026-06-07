@@ -1,0 +1,4 @@
+id,name,security_status,region_id,constellation_id
+500,Isolated Start,0.9,5,50
+501,Lowsec Only Bridge,0.1,5,50
+502,Unreachable Highsec,0.8,5,50

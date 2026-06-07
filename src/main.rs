@@ -1,24 +1,16 @@
 #![allow(dead_code)]
 
-mod cli;
-mod config;
-mod data;
-mod error;
-mod esi;
-mod graph;
-mod model;
-mod output;
-mod routing;
-
 use anyhow::{bail, Context};
 use clap::Parser;
-use cli::{Cli, Commands};
-use config::AppConfig;
-use data::cache::load_system_activity;
-use data::sde::SdeData;
-use graph::highsec_graph::build_highsec_graph;
-use routing::candidate_filter::filter_candidates;
-use routing::generator::generate_route;
+use eve_ded_route::cli::{Cli, Commands};
+use eve_ded_route::config::AppConfig;
+use eve_ded_route::data::cache::load_system_activity;
+use eve_ded_route::data::sde::SdeData;
+use eve_ded_route::esi;
+use eve_ded_route::graph::highsec_graph::build_highsec_graph;
+use eve_ded_route::output;
+use eve_ded_route::routing::candidate_filter::filter_candidates;
+use eve_ded_route::routing::generator::generate_route;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
