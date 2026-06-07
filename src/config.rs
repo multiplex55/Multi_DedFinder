@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::cli::{CliOptions, OutputFormat};
-use crate::routing::route_modes::RouteMode;
+use crate::model::route::RouteMode;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(default)]

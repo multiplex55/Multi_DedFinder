@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
 
-use crate::routing::route_modes::RouteMode;
+use crate::model::route::RouteMode;
 
 #[derive(Debug, Parser)]
 #[command(name = "eve-ded-route")]
