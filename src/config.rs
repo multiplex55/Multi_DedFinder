@@ -79,6 +79,8 @@ pub struct EsiConfig {
     pub client_id: Option<String>,
     pub callback_url: Option<String>,
     pub activity_cache_minutes: u64,
+    pub activity_cache_path: Option<PathBuf>,
+    pub allow_stale_activity_cache: bool,
 }
 
 impl AppConfig {
@@ -182,6 +184,8 @@ impl Default for EsiConfig {
             client_id: None,
             callback_url: None,
             activity_cache_minutes: 15,
+            activity_cache_path: None,
+            allow_stale_activity_cache: false,
         }
     }
 }
@@ -197,6 +201,8 @@ mod tests {
         assert_eq!(config.filter.min_security_status, 0.45);
         assert_eq!(config.route.waypoint_count, 25);
         assert_eq!(config.esi.activity_cache_minutes, 15);
+        assert!(config.esi.activity_cache_path.is_none());
+        assert!(!config.esi.allow_stale_activity_cache);
         assert_eq!(config.route.mode, RouteMode::DenseQuiet);
         assert_eq!(config.route.trade_hub_radius, 3);
     }
@@ -237,6 +243,8 @@ regions = ["Pochven"]
 client_id = "client"
 callback_url = "http://localhost/callback"
 activity_cache_minutes = 30
+activity_cache_path = "/tmp/eve-activity.json"
+allow_stale_activity_cache = true
 "#,
         )
         .expect("config should parse");
@@ -258,6 +266,11 @@ activity_cache_minutes = 30
         assert_eq!(config.weights.activity, 2.0);
         assert_eq!(config.avoid.systems, vec!["Uedama"]);
         assert_eq!(config.esi.activity_cache_minutes, 30);
+        assert_eq!(
+            config.esi.activity_cache_path.as_deref(),
+            Some(Path::new("/tmp/eve-activity.json"))
+        );
+        assert!(config.esi.allow_stale_activity_cache);
     }
 
     #[test]
