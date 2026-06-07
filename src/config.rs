@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -7,10 +7,11 @@ use serde::{Deserialize, Serialize};
 use crate::cli::{CliOptions, OutputFormat};
 use crate::model::route::RouteMode;
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 #[serde(default)]
 pub struct AppConfig {
     pub start: StartConfig,
+    pub data: DataConfig,
     pub route: RouteConfig,
     pub filter: FilterConfig,
     pub weights: WeightConfig,
@@ -22,6 +23,12 @@ pub struct AppConfig {
 #[serde(default)]
 pub struct StartConfig {
     pub system: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(default)]
+pub struct DataConfig {
+    pub sde_path: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -36,9 +43,10 @@ pub struct RouteConfig {
     pub trade_hub_radius: u32,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ConfigOutputFormat {
+    #[default]
     Text,
     Json,
 }
@@ -95,6 +103,9 @@ impl AppConfig {
         if let Some(start) = &cli.start {
             self.start.system = Some(start.clone());
         }
+        if let Some(sde_path) = &cli.sde_path {
+            self.data.sde_path = Some(sde_path.clone());
+        }
         if let Some(waypoints) = cli.waypoints {
             self.route.waypoint_count = waypoints;
         }
@@ -123,19 +134,6 @@ impl AppConfig {
     }
 }
 
-impl Default for AppConfig {
-    fn default() -> Self {
-        Self {
-            start: StartConfig::default(),
-            route: RouteConfig::default(),
-            filter: FilterConfig::default(),
-            weights: WeightConfig::default(),
-            avoid: AvoidConfig::default(),
-            esi: EsiConfig::default(),
-        }
-    }
-}
-
 impl Default for RouteConfig {
     fn default() -> Self {
         Self {
@@ -147,12 +145,6 @@ impl Default for RouteConfig {
             prefer_loop: true,
             trade_hub_radius: 3,
         }
-    }
-}
-
-impl Default for ConfigOutputFormat {
-    fn default() -> Self {
-        Self::Text
     }
 }
 
@@ -216,6 +208,9 @@ mod tests {
 [start]
 system = "Jita"
 
+[data]
+sde_path = "tests/fixtures/sde"
+
 [route]
 waypoint_count = 12
 max_distance = 40
@@ -247,6 +242,10 @@ activity_cache_minutes = 30
         .expect("config should parse");
 
         assert_eq!(config.start.system.as_deref(), Some("Jita"));
+        assert_eq!(
+            config.data.sde_path.as_deref(),
+            Some(Path::new("tests/fixtures/sde"))
+        );
         assert_eq!(config.route.waypoint_count, 12);
         assert_eq!(config.route.max_distance, Some(40));
         assert_eq!(config.route.mode, RouteMode::UltraQuiet);
@@ -284,6 +283,7 @@ highsec_only = false
 
         let cli = CliOptions {
             start: Some("Jita".to_string()),
+            sde_path: Some(PathBuf::from("/tmp/sde")),
             waypoints: Some(30),
             max_distance: Some(50),
             highsec_only: Some(true),
@@ -298,6 +298,7 @@ highsec_only = false
         let merged = config.with_cli_overrides(&cli);
 
         assert_eq!(merged.start.system.as_deref(), Some("Jita"));
+        assert_eq!(merged.data.sde_path.as_deref(), Some(Path::new("/tmp/sde")));
         assert_eq!(merged.route.waypoint_count, 30);
         assert_eq!(merged.route.max_distance, Some(50));
         assert!(merged.filter.highsec_only);
