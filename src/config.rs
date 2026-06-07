@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::cli::{CliOptions, OutputFormat};
+use crate::cli::CliOptions;
 use crate::model::route::RouteMode;
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
@@ -38,6 +38,8 @@ pub struct RouteConfig {
     pub max_distance: Option<u32>,
     pub mode: RouteMode,
     pub output: ConfigOutputFormat,
+    pub output_path: Option<PathBuf>,
+    pub json_path: Option<PathBuf>,
     pub push_waypoints: bool,
     pub prefer_loop: bool,
     pub trade_hub_radius: u32,
@@ -138,10 +140,11 @@ impl AppConfig {
         if let Some(mode) = cli.mode {
             self.route.mode = mode;
         }
-        if let Some(output) = cli.output {
-            self.route.output = output.into();
+        if let Some(output_path) = &cli.output {
+            self.route.output_path = Some(output_path.clone());
         }
-        if cli.json.unwrap_or(false) {
+        if let Some(json_path) = &cli.json {
+            self.route.json_path = Some(json_path.clone());
             self.route.output = ConfigOutputFormat::Json;
         }
         if let Some(push_waypoints) = cli.push_waypoints {
@@ -161,18 +164,11 @@ impl Default for RouteConfig {
             max_distance: None,
             mode: RouteMode::DenseQuiet,
             output: ConfigOutputFormat::Text,
+            output_path: None,
+            json_path: None,
             push_waypoints: false,
             prefer_loop: true,
             trade_hub_radius: 3,
-        }
-    }
-}
-
-impl From<OutputFormat> for ConfigOutputFormat {
-    fn from(value: OutputFormat) -> Self {
-        match value {
-            OutputFormat::Text => Self::Text,
-            OutputFormat::Json => Self::Json,
         }
     }
 }
@@ -359,8 +355,8 @@ highsec_only = false
             max_distance: Some(50),
             highsec_only: Some(true),
             mode: Some(RouteMode::UltraQuiet),
-            output: None,
-            json: Some(true),
+            output: Some(PathBuf::from("/tmp/route.txt")),
+            json: Some(PathBuf::from("/tmp/route.json")),
             push_waypoints: Some(true),
             prefer_loop: None,
             no_prefer_loop: Some(true),
@@ -375,6 +371,14 @@ highsec_only = false
         assert!(merged.filter.highsec_only);
         assert_eq!(merged.route.mode, RouteMode::UltraQuiet);
         assert_eq!(merged.route.output, ConfigOutputFormat::Json);
+        assert_eq!(
+            merged.route.output_path.as_deref(),
+            Some(Path::new("/tmp/route.txt"))
+        );
+        assert_eq!(
+            merged.route.json_path.as_deref(),
+            Some(Path::new("/tmp/route.json"))
+        );
         assert!(merged.route.push_waypoints);
         assert!(!merged.route.prefer_loop);
     }

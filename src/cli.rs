@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
+use clap::{ArgAction, Args, Parser, Subcommand};
 
 use crate::model::route::RouteMode;
 
@@ -22,12 +22,6 @@ pub enum Commands {
     Generate(CliOptions),
     /// Push generated waypoints to ESI.
     Push(CliOptions),
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
-pub enum OutputFormat {
-    Text,
-    Json,
 }
 
 #[derive(Args, Clone, Debug, Default, PartialEq)]
@@ -56,13 +50,13 @@ pub struct CliOptions {
     #[arg(long, value_enum)]
     pub mode: Option<RouteMode>,
 
-    /// Output format.
-    #[arg(long, value_enum)]
-    pub output: Option<OutputFormat>,
+    /// Write text output to this path. If omitted, text output is printed to stdout.
+    #[arg(long, value_name = "PATH")]
+    pub output: Option<PathBuf>,
 
-    /// Emit JSON output. Equivalent to --output json.
-    #[arg(long, action = ArgAction::SetTrue)]
-    pub json: Option<bool>,
+    /// Write pretty-printed JSON output to this path.
+    #[arg(long, value_name = "PATH")]
+    pub json: Option<PathBuf>,
 
     /// Push generated waypoints after generation.
     #[arg(long, action = ArgAction::SetTrue)]
