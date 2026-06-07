@@ -122,6 +122,13 @@ mod tests {
             activity: 0.2,
             distance: 0.3,
             security: 0.4,
+            jump_score: 0.2,
+            npc_score: 0.3,
+            danger_score: 0.4,
+            cluster_density_score: 0.5,
+            hub_distance_score: 0.6,
+            dead_end_penalty: 0.0,
+            reuse_penalty: 0.0,
             total: 0.9,
         }
     }

@@ -2,9 +2,26 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 pub struct ScoreBreakdown {
+    #[serde(default)]
     pub activity: f32,
+    #[serde(default)]
     pub distance: f32,
+    #[serde(default)]
     pub security: f32,
+    #[serde(default)]
+    pub jump_score: f32,
+    #[serde(default)]
+    pub npc_score: f32,
+    #[serde(default)]
+    pub danger_score: f32,
+    #[serde(default)]
+    pub cluster_density_score: f32,
+    #[serde(default)]
+    pub hub_distance_score: f32,
+    #[serde(default)]
+    pub dead_end_penalty: f32,
+    #[serde(default)]
+    pub reuse_penalty: f32,
     pub total: f32,
 }
 
