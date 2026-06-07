@@ -12,7 +12,7 @@ use url::Url;
 pub const WAYPOINT_SCOPE: &str = "esi-ui.write_waypoint.v1";
 const AUTH_URL: &str = "https://login.eveonline.com/v2/oauth/authorize";
 const TOKEN_URL: &str = "https://login.eveonline.com/v2/oauth/token";
-const DEFAULT_CALLBACK_URL: &str = "http://localhost:53682/callback";
+const DEFAULT_CALLBACK_URL: &str = "http://localhost:53683/api/auth/callback";
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct EsiToken {
