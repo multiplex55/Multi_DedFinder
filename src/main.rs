@@ -5,11 +5,12 @@ use clap::Parser;
 use eve_ded_route::cli::{Cli, Commands};
 use eve_ded_route::config::AppConfig;
 use eve_ded_route::data::cache::load_system_activity;
+use eve_ded_route::data::route_history::{load_route_history, save_route_history};
 use eve_ded_route::data::sde::SdeData;
 use eve_ded_route::esi;
 use eve_ded_route::graph::highsec_graph::build_highsec_graph;
 use eve_ded_route::output;
-use eve_ded_route::routing::candidate_filter::filter_candidates;
+use eve_ded_route::routing::candidate_filter::filter_candidates_with_route_history;
 use eve_ded_route::routing::generator::generate_route;
 
 #[tokio::main]
@@ -55,7 +56,35 @@ async fn main() -> anyhow::Result<()> {
             }
 
             let activity = load_system_activity(&config).await?;
-            let candidates = filter_candidates(&graph, start_system_id, &activity, &config);
+            let route_history_systems = if config.route.route_history_enabled {
+                let history_path = config.route.route_history_path.as_deref().context(
+                    "route history is enabled but [route].route_history_path is not set",
+                )?;
+                match load_route_history(history_path) {
+                    Ok(history) => history.systems_used_in_last_route(),
+                    Err(error)
+                        if config.route.ignore_malformed_route_history
+                            && error.downcast_ref::<serde_json::Error>().is_some() =>
+                    {
+                        tracing::warn!(
+                            history_path = %history_path.display(),
+                            error = %error,
+                            "ignoring malformed route history because config allows it"
+                        );
+                        Default::default()
+                    }
+                    Err(error) => return Err(error),
+                }
+            } else {
+                Default::default()
+            };
+            let candidates = filter_candidates_with_route_history(
+                &graph,
+                start_system_id,
+                &activity,
+                &config,
+                &route_history_systems,
+            );
             let route = generate_route(&graph, start_system_id, &candidates, &config);
 
             if let Some(output_path) = &config.route.output_path {
@@ -71,6 +100,13 @@ async fn main() -> anyhow::Result<()> {
                 output::json::write_route(&route, json_path).with_context(|| {
                     format!("failed to write JSON route to {}", json_path.display())
                 })?;
+            }
+
+            if config.route.route_history_enabled {
+                let history_path = config.route.route_history_path.as_deref().context(
+                    "route history is enabled but [route].route_history_path is not set",
+                )?;
+                save_route_history(history_path, &route)?;
             }
         }
         Commands::Push(options) => {
