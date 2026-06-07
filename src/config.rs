@@ -56,6 +56,24 @@ pub enum ConfigOutputFormat {
 pub struct FilterConfig {
     pub highsec_only: bool,
     pub min_security_status: f32,
+    pub max_distance_from_start: Option<u32>,
+    pub max_jumps_last_hour: Option<u32>,
+    pub max_npc_kills_last_hour: Option<u32>,
+    pub max_ship_kills_last_hour: Option<u32>,
+    pub max_pod_kills_last_hour: Option<u32>,
+    pub activity_behavior: FilterBehavior,
+    pub trade_hub_behavior: FilterBehavior,
+    pub trade_hubs: Vec<String>,
+    pub trade_hub_soft_penalty: f32,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FilterBehavior {
+    #[default]
+    HardExclude,
+    SoftPenalty,
+    Disabled,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -66,7 +84,7 @@ pub struct WeightConfig {
     pub security: f32,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(default)]
 pub struct AvoidConfig {
     pub systems: Vec<String>,
@@ -164,8 +182,40 @@ impl Default for FilterConfig {
         Self {
             highsec_only: true,
             min_security_status: 0.45,
+            max_distance_from_start: None,
+            max_jumps_last_hour: Some(80),
+            max_npc_kills_last_hour: Some(250),
+            max_ship_kills_last_hour: Some(25),
+            max_pod_kills_last_hour: Some(10),
+            activity_behavior: FilterBehavior::HardExclude,
+            trade_hub_behavior: FilterBehavior::HardExclude,
+            trade_hubs: default_trade_hubs(),
+            trade_hub_soft_penalty: 0.25,
         }
     }
+}
+
+impl Default for AvoidConfig {
+    fn default() -> Self {
+        Self {
+            systems: default_avoid_systems(),
+            regions: Vec::new(),
+        }
+    }
+}
+
+fn default_avoid_systems() -> Vec<String> {
+    ["Jita", "Perimeter", "Uedama", "Sivala", "Ahbazon"]
+        .into_iter()
+        .map(String::from)
+        .collect()
+}
+
+fn default_trade_hubs() -> Vec<String> {
+    ["Jita", "Amarr", "Dodixie", "Rens", "Hek"]
+        .into_iter()
+        .map(String::from)
+        .collect()
 }
 
 impl Default for WeightConfig {
@@ -199,6 +249,14 @@ mod tests {
         let config = AppConfig::default();
 
         assert_eq!(config.filter.min_security_status, 0.45);
+        assert_eq!(
+            config.avoid.systems,
+            vec!["Jita", "Perimeter", "Uedama", "Sivala", "Ahbazon"]
+        );
+        assert_eq!(
+            config.filter.trade_hubs,
+            vec!["Jita", "Amarr", "Dodixie", "Rens", "Hek"]
+        );
         assert_eq!(config.route.waypoint_count, 25);
         assert_eq!(config.esi.activity_cache_minutes, 15);
         assert!(config.esi.activity_cache_path.is_none());
