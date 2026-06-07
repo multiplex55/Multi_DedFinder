@@ -103,6 +103,7 @@ pub struct AvoidConfig {
 pub struct EsiConfig {
     pub client_id: Option<String>,
     pub callback_url: Option<String>,
+    pub scopes: Vec<String>,
     pub activity_cache_minutes: u64,
     pub activity_cache_path: Option<PathBuf>,
     pub allow_stale_activity_cache: bool,
@@ -238,6 +239,7 @@ impl Default for EsiConfig {
         Self {
             client_id: None,
             callback_url: None,
+            scopes: Vec::new(),
             activity_cache_minutes: 15,
             activity_cache_path: None,
             allow_stale_activity_cache: false,
@@ -316,6 +318,7 @@ regions = ["Pochven"]
 [esi]
 client_id = "client"
 callback_url = "http://localhost/callback"
+scopes = ["esi-ui.write_waypoint.v1"]
 activity_cache_minutes = 30
 activity_cache_path = "/tmp/eve-activity.json"
 allow_stale_activity_cache = true
@@ -346,6 +349,7 @@ allow_stale_activity_cache = true
         assert_eq!(config.filter.min_security_status, 0.6);
         assert_eq!(config.weights.activity, 2.0);
         assert_eq!(config.avoid.systems, vec!["Uedama"]);
+        assert_eq!(config.esi.scopes, vec!["esi-ui.write_waypoint.v1"]);
         assert_eq!(config.esi.activity_cache_minutes, 30);
         assert_eq!(
             config.esi.activity_cache_path.as_deref(),
@@ -387,6 +391,10 @@ highsec_only = false
             push_waypoints: Some(true),
             prefer_loop: None,
             no_prefer_loop: Some(true),
+            character_id: Some(42),
+            character_name: Some("Pilot".to_string()),
+            yes: Some(true),
+            dry_run: Some(false),
         };
 
         let merged = config.with_cli_overrides(&cli);

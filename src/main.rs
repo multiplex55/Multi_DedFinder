@@ -8,7 +8,10 @@ use eve_ded_route::data::cache::load_system_activity;
 use eve_ded_route::data::route_history::{load_route_history, save_route_history};
 use eve_ded_route::data::sde::SdeData;
 use eve_ded_route::esi;
+use eve_ded_route::esi::auth::Character;
+use eve_ded_route::esi::waypoint::PushOptions;
 use eve_ded_route::graph::highsec_graph::build_highsec_graph;
+use eve_ded_route::model::route::GeneratedRoute;
 use eve_ded_route::output;
 use eve_ded_route::routing::candidate_filter::filter_candidates_with_route_history;
 use eve_ded_route::routing::generator::generate_route;
@@ -108,10 +111,48 @@ async fn main() -> anyhow::Result<()> {
                 )?;
                 save_route_history(history_path, &route)?;
             }
+
+            if config.route.push_waypoints {
+                let character_id = options
+                    .character_id
+                    .context("--character-id is required when pushing waypoints")?;
+                let character = Character::new(character_id, options.character_name.clone());
+                let push_options = PushOptions {
+                    dry_run: options.dry_run.unwrap_or(false),
+                    yes: options.yes.unwrap_or(false),
+                };
+                esi::waypoint::push_waypoints_from_config(
+                    &config,
+                    character,
+                    &route,
+                    &push_options,
+                )
+                .await
+                .context("failed to push generated waypoints")?;
+            }
         }
         Commands::Push(options) => {
             let config = config.with_cli_overrides(&options);
-            esi::waypoint::push_waypoints(&config)
+            let route_path = options
+                .json
+                .as_deref()
+                .context("push requires --json PATH pointing to a generated route JSON file")?;
+            let route_contents = std::fs::read_to_string(route_path).with_context(|| {
+                format!("failed to read route JSON from {}", route_path.display())
+            })?;
+            let route: GeneratedRoute =
+                serde_json::from_str(&route_contents).with_context(|| {
+                    format!("failed to parse route JSON from {}", route_path.display())
+                })?;
+            let character_id = options
+                .character_id
+                .context("push requires --character-id for the EVE character to update")?;
+            let character = Character::new(character_id, options.character_name.clone());
+            let push_options = PushOptions {
+                dry_run: options.dry_run.unwrap_or(false),
+                yes: options.yes.unwrap_or(false),
+            };
+            esi::waypoint::push_waypoints_from_config(&config, character, &route, &push_options)
                 .await
                 .context("failed to push waypoints")?;
         }
