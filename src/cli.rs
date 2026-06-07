@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::str::FromStr;
 
 use clap::{ArgAction, Args, Parser, Subcommand};
 
@@ -7,6 +8,9 @@ use crate::model::route::RouteMode;
 #[derive(Debug, Parser)]
 #[command(name = "eve-ded-route")]
 #[command(about = "Generate and optionally push EVE Online DED route waypoints.")]
+#[command(
+    long_about = "Generate high-sec DED route waypoints from public ESI activity data and static/local SDE data. This tool does not scan live anomalies, parse probe scanner results, automate the EVE UI, click in-client, or interact with the EVE client process."
+)]
 pub struct Cli {
     /// Path to a config.toml file.
     #[arg(long, global = true)]
@@ -18,7 +22,10 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Commands {
-    /// Generate a route from local SDE and ESI activity data.
+    /// Generate a route from local SDE and public ESI activity data; does not scan live anomalies.
+    #[command(
+        long_about = "Generate a route from public/static data: public ESI activity data and static/local SDE data. This tool does not scan live anomalies, parse probe scanner results, automate the EVE UI, click in-client, or interact with the EVE client process."
+    )]
     Generate(CliOptions),
     /// Push generated waypoints to ESI.
     Push(CliOptions),
@@ -46,9 +53,13 @@ pub struct CliOptions {
     #[arg(long, action = ArgAction::SetTrue)]
     pub highsec_only: Option<bool>,
 
-    /// Route generation strategy.
-    #[arg(long, value_enum)]
+    /// Route generation strategy. Use --all-modes to generate UltraQuiet, DenseQuiet, and Sweep together.
+    #[arg(long, value_parser = parse_route_mode)]
     pub mode: Option<RouteMode>,
+
+    /// Generate UltraQuiet, DenseQuiet, and Sweep routes in one run.
+    #[arg(long, action = ArgAction::SetTrue, conflicts_with = "mode")]
+    pub all_modes: Option<bool>,
 
     /// Write text output to this path. If omitted, text output is printed to stdout.
     #[arg(long, value_name = "PATH")]
@@ -85,6 +96,10 @@ pub struct CliOptions {
     /// Print what would be pushed without calling ESI.
     #[arg(long, action = ArgAction::SetTrue)]
     pub dry_run: Option<bool>,
+}
+
+fn parse_route_mode(value: &str) -> Result<RouteMode, String> {
+    RouteMode::from_str(value).map_err(|error| format!("invalid route mode: {error}"))
 }
 
 impl CliOptions {
