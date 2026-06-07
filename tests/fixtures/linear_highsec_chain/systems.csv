@@ -1,0 +1,6 @@
+id,name,security_status,region_id,constellation_id
+100,Linear Start,0.9,1,10
+101,Linear One,0.8,1,10
+102,Linear Two,0.7,1,10
+103,Linear Three,0.6,1,10
+104,Linear Four,0.5,1,10

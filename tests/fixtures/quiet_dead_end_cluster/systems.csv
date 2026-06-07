@@ -1,0 +1,8 @@
+id,name,security_status,region_id,constellation_id
+300,Cluster Start,0.9,3,30
+301,Isolated Whisper,0.95,3,30
+302,Dense Gate,0.8,3,30
+303,Dense Quiet A,0.8,3,30
+304,Dense Quiet B,0.8,3,30
+305,Dense Quiet C,0.8,3,30
+306,Dense Quiet D,0.8,3,30

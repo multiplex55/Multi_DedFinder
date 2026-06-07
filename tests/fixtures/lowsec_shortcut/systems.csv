@@ -1,0 +1,7 @@
+id,name,security_status,region_id,constellation_id
+200,Shortcut Start,0.9,2,20
+201,Busy Near Highsec,0.8,2,20
+202,Lowsec Bridge,0.2,2,20
+203,Quiet Far Highsec,0.7,2,20
+204,Highsec Detour A,0.7,2,20
+205,Highsec Detour B,0.6,2,20

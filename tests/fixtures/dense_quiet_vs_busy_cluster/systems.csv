@@ -1,0 +1,12 @@
+id,name,security_status,region_id,constellation_id
+400,Traffic Start,0.9,4,40
+401,Quiet Cluster A,0.8,4,40
+402,Quiet Cluster B,0.8,4,40
+403,Quiet Cluster C,0.8,4,40
+404,Quiet Cluster D,0.8,4,40
+405,Busy Cluster A,0.8,4,40
+406,Busy Cluster B,0.8,4,40
+407,Busy Cluster C,0.8,4,40
+408,Busy Cluster D,0.8,4,40
+409,Sweep Branch A,0.8,4,40
+410,Sweep Branch B,0.8,4,40
