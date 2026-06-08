@@ -5,6 +5,7 @@ use anyhow::Result;
 use serde::Serialize;
 
 use crate::model::route::GeneratedRoute;
+use crate::output::ensure_parent_dir;
 use crate::output::text::validate_route_output_claims;
 
 #[derive(Debug, Serialize)]
@@ -29,17 +30,23 @@ pub fn render_routes(routes: &[GeneratedRoute]) -> Result<String> {
 }
 
 pub fn write_route(route: &GeneratedRoute, path: impl AsRef<Path>) -> Result<()> {
+    let path = path.as_ref();
+    ensure_parent_dir(path)?;
     fs::write(path, render_route(route)?)?;
     Ok(())
 }
 
 pub fn write_routes(routes: &[GeneratedRoute], path: impl AsRef<Path>) -> Result<()> {
+    let path = path.as_ref();
+    ensure_parent_dir(path)?;
     fs::write(path, render_routes(routes)?)?;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use chrono::{TimeZone, Utc};
     use serde_json::{json, Value};
 
@@ -61,6 +68,17 @@ mod tests {
             reuse_penalty: 0.1,
             total: 0.75,
         }
+    }
+
+    fn nested_output_path(test_name: &str) -> std::path::PathBuf {
+        std::env::temp_dir()
+            .join(format!(
+                "eve-ded-json-output-{test_name}-{}-{}",
+                std::process::id(),
+                Utc::now().timestamp_nanos_opt().unwrap()
+            ))
+            .join("nested")
+            .join("route.json")
     }
 
     fn route() -> GeneratedRoute {
@@ -139,6 +157,34 @@ mod tests {
             value["legs"][0]["path_system_names"],
             json!(["Start", "Middle", "Waypoint"])
         );
+    }
+
+    #[test]
+    fn write_route_creates_nested_parent_and_writes_file() {
+        let path = nested_output_path("single");
+
+        write_route(&route(), &path).expect("route should write to nested output path");
+
+        assert!(path.parent().unwrap().exists());
+        let contents = fs::read_to_string(&path).expect("route output should be readable");
+        let value: Value = serde_json::from_str(&contents).unwrap();
+        assert_eq!(value["start_system"], json!("Start"));
+
+        let _ = fs::remove_dir_all(path.parent().unwrap().parent().unwrap());
+    }
+
+    #[test]
+    fn write_routes_creates_nested_parent_and_writes_file() {
+        let path = nested_output_path("multiple");
+
+        write_routes(&[route()], &path).expect("routes should write to nested output path");
+
+        assert!(path.parent().unwrap().exists());
+        let contents = fs::read_to_string(&path).expect("routes output should be readable");
+        let value: Value = serde_json::from_str(&contents).unwrap();
+        assert_eq!(value["routes"][0]["start_system"], json!("Start"));
+
+        let _ = fs::remove_dir_all(path.parent().unwrap().parent().unwrap());
     }
 
     #[test]
