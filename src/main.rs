@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 use clap::Parser;
@@ -142,11 +142,8 @@ async fn run_generate(config: AppConfig, options: CliOptions) -> Result<()> {
 
 async fn run_push(config: AppConfig, options: CliOptions) -> Result<()> {
     let config = config.with_cli_overrides(&options);
-    let route_path = options
-        .json
-        .as_deref()
-        .context("push requires --json PATH pointing to a generated route JSON file")?;
-    let route = load_route_json(route_path)?;
+    let route_path = route_json_path_for_push(&config, &options)?;
+    let route = load_route_json(&route_path, &config)?;
     if route.waypoints.is_empty() {
         bail!("cannot push route because it has zero waypoints");
     }
@@ -226,9 +223,37 @@ fn write_json_output(routes: &[GeneratedRoute], config: &AppConfig) -> Result<()
     Ok(())
 }
 
-fn load_route_json(route_path: &Path) -> Result<GeneratedRoute> {
-    let route_contents = std::fs::read_to_string(route_path)
-        .with_context(|| format!("failed to read route JSON from {}", route_path.display()))?;
+fn route_json_path_for_push(config: &AppConfig, options: &CliOptions) -> Result<PathBuf> {
+    options
+        .json
+        .clone()
+        .or_else(|| config.route.json_path.clone())
+        .context(
+            "push requires a route JSON file: set --json PATH or [route].json_path, then run generate first if the file does not exist",
+        )
+}
+
+fn load_route_json(route_path: &Path, config: &AppConfig) -> Result<GeneratedRoute> {
+    let route_contents = match std::fs::read_to_string(route_path) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let mut message = format!(
+                "route JSON file not found at attempted path {}. Run `eve-ded-route --config config.toml generate` first to create it",
+                route_path.display()
+            );
+            if config.route.push_waypoints {
+                message.push_str(
+                    ", or run `eve-ded-route --config config.toml generate --push-waypoints` to generate and push in one command",
+                );
+            }
+            bail!(message);
+        }
+        Err(error) => {
+            return Err(error).with_context(|| {
+                format!("failed to read route JSON from {}", route_path.display())
+            });
+        }
+    };
     serde_json::from_str(&route_contents)
         .with_context(|| format!("failed to parse route JSON from {}", route_path.display()))
 }
@@ -270,4 +295,169 @@ fn validate_push_configuration_if_requested(config: &AppConfig) -> Result<()> {
         bail!("--push-waypoints requires ESI config: set [esi].client_id before authentication");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use chrono::Utc;
+    use eve_ded_route::model::route::{RouteLeg, RouteWaypoint};
+    use eve_ded_route::model::score::ScoreBreakdown;
+    use serde_json::json;
+
+    use super::*;
+
+    fn temp_route_path(file_name: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock should be after unix epoch")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "eve-ded-route-main-tests-{}-{unique}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&dir).expect("test temp directory should be created");
+        dir.join(file_name)
+    }
+
+    fn score_breakdown() -> ScoreBreakdown {
+        ScoreBreakdown {
+            activity: 0.2,
+            distance: 0.3,
+            security: 0.4,
+            jump_score: 0.2,
+            npc_score: 0.3,
+            danger_score: 0.4,
+            cluster_density_score: 0.5,
+            hub_distance_score: 0.6,
+            dead_end_penalty: 0.0,
+            reuse_penalty: 0.0,
+            total: 0.9,
+        }
+    }
+
+    fn waypoint() -> RouteWaypoint {
+        RouteWaypoint {
+            order: 1,
+            system_id: 30_000_142,
+            system_name: "Jita".to_string(),
+            security_status: 0.946,
+            region_id: 10_000_002,
+            constellation_id: 20_000_020,
+            score: 0.9,
+            jumps_last_hour: 12,
+            npc_kills_last_hour: 3,
+            ship_kills_last_hour: 2,
+            pod_kills_last_hour: 1,
+            distance_from_start: 0,
+            score_breakdown: score_breakdown(),
+        }
+    }
+
+    fn route_with_waypoints(waypoints: Vec<RouteWaypoint>) -> GeneratedRoute {
+        GeneratedRoute {
+            start_system: "Jita".to_string(),
+            start_system_id: 30_000_142,
+            mode: RouteMode::DenseQuiet,
+            highsec_only: true,
+            total_jumps: 1,
+            average_score: 0.9,
+            activity_timestamp: Utc::now(),
+            config_used: json!({"route": {"waypoint_count": waypoints.len()}}),
+            waypoints,
+            legs: vec![RouteLeg {
+                from_system_id: 30_000_142,
+                to_system_id: 30_000_141,
+                jump_count: 1,
+                path_system_ids: vec![30_000_142, 30_000_141],
+                path_system_names: vec!["Jita".to_string(), "Perimeter".to_string()],
+            }],
+        }
+    }
+
+    fn write_route(path: &Path, route: &GeneratedRoute) {
+        let contents = serde_json::to_string(route).expect("route should serialize");
+        fs::write(path, contents).expect("route JSON should be written");
+    }
+
+    #[test]
+    fn push_uses_config_route_json_path_when_cli_json_is_omitted() {
+        let config_path = PathBuf::from("config-route.json");
+        let mut config = AppConfig::default();
+        config.route.json_path = Some(config_path.clone());
+        let options = CliOptions::default();
+
+        let path = route_json_path_for_push(&config, &options).expect("path should resolve");
+
+        assert_eq!(path, config_path);
+    }
+
+    #[test]
+    fn push_cli_json_overrides_config_route_json_path() {
+        let cli_path = PathBuf::from("cli-route.json");
+        let mut config = AppConfig::default();
+        config.route.json_path = Some(PathBuf::from("config-route.json"));
+        let options = CliOptions {
+            json: Some(cli_path.clone()),
+            ..Default::default()
+        };
+
+        let path = route_json_path_for_push(&config, &options).expect("path should resolve");
+
+        assert_eq!(path, cli_path);
+    }
+
+    #[test]
+    fn missing_route_json_returns_clear_error() {
+        let missing_path = temp_route_path("missing-route.json");
+        let mut config = AppConfig::default();
+        config.route.push_waypoints = true;
+
+        let error = load_route_json(&missing_path, &config).expect_err("missing file should fail");
+        let message = error.to_string();
+
+        assert!(
+            message.contains(&missing_path.display().to_string()),
+            "error should include attempted path: {message}"
+        );
+        assert!(
+            message.contains("eve-ded-route --config config.toml generate"),
+            "error should suggest generate command: {message}"
+        );
+        assert!(
+            message.contains("generate --push-waypoints"),
+            "error should mention generate --push-waypoints when configured: {message}"
+        );
+    }
+
+    #[test]
+    fn existing_route_json_loads_successfully() {
+        let route_path = temp_route_path("route.json");
+        let route = route_with_waypoints(vec![waypoint()]);
+        write_route(&route_path, &route);
+
+        let loaded = load_route_json(&route_path, &AppConfig::default())
+            .expect("existing route JSON should load");
+
+        assert_eq!(loaded, route);
+    }
+
+    #[tokio::test]
+    async fn zero_waypoint_route_still_fails_existing_safety_check() {
+        let route_path = temp_route_path("empty-route.json");
+        write_route(&route_path, &route_with_waypoints(Vec::new()));
+        let mut config = AppConfig::default();
+        config.route.json_path = Some(route_path);
+
+        let error = run_push(config, CliOptions::default())
+            .await
+            .expect_err("zero-waypoint route should not be pushed");
+
+        assert_eq!(
+            error.to_string(),
+            "cannot push route because it has zero waypoints"
+        );
+    }
 }
