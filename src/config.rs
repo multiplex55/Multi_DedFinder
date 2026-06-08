@@ -107,6 +107,7 @@ pub struct WeightConfig {
 pub struct AvoidConfig {
     pub systems: Vec<String>,
     pub regions: Vec<String>,
+    pub region_ids: Vec<i32>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -231,6 +232,7 @@ impl Default for AvoidConfig {
         Self {
             systems: default_avoid_systems(),
             regions: Vec::new(),
+            region_ids: Vec::new(),
         }
     }
 }
@@ -285,6 +287,8 @@ mod tests {
             config.avoid.systems,
             vec!["Jita", "Perimeter", "Uedama", "Sivala", "Ahbazon"]
         );
+        assert!(config.avoid.regions.is_empty());
+        assert!(config.avoid.region_ids.is_empty());
         assert_eq!(
             config.filter.trade_hubs,
             vec!["Jita", "Amarr", "Dodixie", "Rens", "Hek"]
@@ -360,6 +364,7 @@ security = 3.0
 [avoid]
 systems = ["Uedama"]
 regions = ["Pochven"]
+region_ids = [10000070]
 
 [esi]
 client_id = "client"
@@ -397,6 +402,8 @@ allow_stale_activity_cache = true
         assert_eq!(config.filter.min_security_status, 0.6);
         assert_eq!(config.weights.activity, 2.0);
         assert_eq!(config.avoid.systems, vec!["Uedama"]);
+        assert_eq!(config.avoid.regions, vec!["Pochven"]);
+        assert_eq!(config.avoid.region_ids, vec![10000070]);
         assert_eq!(config.esi.scopes, vec!["esi-ui.write_waypoint.v1"]);
         assert_eq!(config.esi.activity_cache_minutes, 30);
         assert_eq!(

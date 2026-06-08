@@ -478,6 +478,50 @@ mod tests {
     }
 
     #[test]
+    fn route_debug_path_ids_never_include_graph_excluded_avoided_region() {
+        let blocked_region_id = 20;
+        let graph = build_highsec_graph(
+            vec![
+                SolarSystem {
+                    region_id: 10,
+                    ..system(1, 0.9)
+                },
+                SolarSystem {
+                    region_id: blocked_region_id,
+                    ..system(2, 0.9)
+                },
+                SolarSystem {
+                    region_id: 30,
+                    ..system(3, 0.9)
+                },
+                SolarSystem {
+                    region_id: 30,
+                    ..system(4, 0.9)
+                },
+            ]
+            .into_iter()
+            .filter(|system| system.region_id != blocked_region_id),
+            vec![gate(1, 2), gate(2, 4), gate(1, 3), gate(3, 4)],
+            DEFAULT_HIGHSEC_SECURITY_CUTOFF,
+        );
+        let route = generate_route(
+            &graph,
+            1,
+            &[candidate(4, 0.9)],
+            &config(RouteMode::DenseQuiet, 1),
+        );
+
+        assert_eq!(route.legs[0].path_system_ids, vec![1, 3, 4]);
+        assert!(!route.legs[0].path_system_ids.contains(&2));
+        assert!(route.legs[0].path_system_ids.iter().all(|system_id| {
+            graph
+                .systems
+                .get(system_id)
+                .is_some_and(|system| system.region_id != blocked_region_id)
+        }));
+    }
+
+    #[test]
     fn total_jumps_equals_sum_of_route_leg_distances() {
         let graph = build_highsec_graph(
             vec![

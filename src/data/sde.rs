@@ -18,6 +18,8 @@ pub struct SdeData {
     pub systems_by_name: HashMap<String, i32>,
     pub stargate_connections: Vec<StargateConnection>,
     pub diagnostics: SdeDiagnostics,
+    pub regions_by_id: HashMap<i32, RegionInfo>,
+    pub region_ids_by_lowercase_name: HashMap<String, i32>,
     systems_by_lowercase_name: HashMap<String, i32>,
 }
 
@@ -38,6 +40,18 @@ struct StargateRecord {
     target_system_id: i32,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct RegionRecord {
+    pub region_id: i32,
+    pub region_name: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RegionInfo {
+    pub id: i32,
+    pub name: String,
+}
+
 impl SdeData {
     pub fn load_from_path(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
@@ -50,21 +64,39 @@ impl SdeData {
 
         let systems_path = find_prepared_file(path, "systems")?;
         let stargates_path = find_prepared_file(path, "stargates")?;
-        Self::load_from_files(systems_path, stargates_path)
+        let regions_path = find_optional_prepared_file(path, "regions");
+        Self::load_from_files_with_optional_regions(systems_path, stargates_path, regions_path)
     }
 
     pub fn load_from_files(
         systems_path: impl AsRef<Path>,
         stargates_path: impl AsRef<Path>,
     ) -> Result<Self> {
+        Self::load_from_files_with_optional_regions(
+            systems_path,
+            stargates_path,
+            Option::<PathBuf>::None,
+        )
+    }
+
+    pub fn load_from_files_with_optional_regions(
+        systems_path: impl AsRef<Path>,
+        stargates_path: impl AsRef<Path>,
+        regions_path: Option<impl AsRef<Path>>,
+    ) -> Result<Self> {
         let system_records = read_records::<SystemRecord>(systems_path.as_ref())?;
         let stargate_records = read_records::<StargateRecord>(stargates_path.as_ref())?;
-        Self::from_records(system_records, stargate_records)
+        let region_records = regions_path
+            .as_ref()
+            .map(|path| read_records::<RegionRecord>(path.as_ref()))
+            .transpose()?;
+        Self::from_records(system_records, stargate_records, region_records)
     }
 
     fn from_records(
         system_records: Vec<SystemRecord>,
         stargate_records: Vec<StargateRecord>,
+        region_records: Option<Vec<RegionRecord>>,
     ) -> Result<Self> {
         let mut systems = HashMap::new();
         let mut systems_by_name = HashMap::new();
@@ -112,6 +144,8 @@ impl SdeData {
             }
         }
 
+        let (regions_by_id, region_ids_by_lowercase_name) = load_regions(region_records)?;
+
         let mut stargate_connections = Vec::new();
         let mut diagnostics = SdeDiagnostics::default();
 
@@ -134,6 +168,8 @@ impl SdeData {
             systems_by_name,
             stargate_connections,
             diagnostics,
+            regions_by_id,
+            region_ids_by_lowercase_name,
             systems_by_lowercase_name,
         })
     }
@@ -157,6 +193,16 @@ impl SdeData {
 
     pub fn skipped_unknown_stargate_edges(&self) -> usize {
         self.diagnostics.skipped_unknown_stargate_edges
+    }
+
+    pub fn has_region_name_data(&self) -> bool {
+        !self.regions_by_id.is_empty() || !self.region_ids_by_lowercase_name.is_empty()
+    }
+
+    pub fn region_id_by_name(&self, name: &str) -> Option<i32> {
+        self.region_ids_by_lowercase_name
+            .get(&normalize_region_name(name).to_lowercase())
+            .copied()
     }
 }
 
@@ -183,6 +229,54 @@ fn find_prepared_file(directory: &Path, stem: &str) -> Result<PathBuf> {
         "could not find {stem}.csv or {stem}.json under {}",
         directory.display()
     ))
+}
+
+fn find_optional_prepared_file(directory: &Path, stem: &str) -> Option<PathBuf> {
+    for extension in ["csv", "json"] {
+        let candidate = directory.join(format!("{stem}.{extension}"));
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+
+    None
+}
+
+fn load_regions(
+    region_records: Option<Vec<RegionRecord>>,
+) -> Result<(HashMap<i32, RegionInfo>, HashMap<String, i32>)> {
+    let mut regions_by_id = HashMap::new();
+    let mut region_ids_by_lowercase_name = HashMap::new();
+
+    for record in region_records.unwrap_or_default() {
+        let canonical_name = normalize_region_name(&record.region_name);
+        if canonical_name.is_empty() {
+            bail!("region {} has an empty region_name", record.region_id);
+        }
+
+        let info = RegionInfo {
+            id: record.region_id,
+            name: canonical_name.clone(),
+        };
+
+        if regions_by_id.insert(info.id, info).is_some() {
+            bail!("duplicate region_id {} in SDE data", record.region_id);
+        }
+
+        let lowercase_name = canonical_name.to_lowercase();
+        if let Some(existing_id) =
+            region_ids_by_lowercase_name.insert(lowercase_name, record.region_id)
+        {
+            bail!(
+                "duplicate case-insensitive region_name {:?} in SDE data for region IDs {} and {}",
+                canonical_name,
+                existing_id,
+                record.region_id
+            );
+        }
+    }
+
+    Ok((regions_by_id, region_ids_by_lowercase_name))
 }
 
 fn read_records<T>(path: &Path) -> Result<Vec<T>>
@@ -223,6 +317,10 @@ where
 }
 
 fn normalize_system_name(name: &str) -> String {
+    name.trim().to_string()
+}
+
+fn normalize_region_name(name: &str) -> String {
     name.trim().to_string()
 }
 
@@ -278,6 +376,7 @@ mod tests {
                 },
             ],
             Vec::new(),
+            None,
         )
         .expect_err("duplicate system IDs should be rejected");
 
@@ -301,6 +400,33 @@ mod tests {
                 to_system_id: 30000144,
             }
         );
+    }
+
+    #[test]
+    fn optional_regions_file_is_loaded_when_present() {
+        let data = SdeData::load_from_files_with_optional_regions(
+            fixture_path("systems_small.csv"),
+            fixture_path("stargates_small.csv"),
+            Some(fixture_path("regions_small.csv")),
+        )
+        .expect("SDE fixture with regions should load");
+
+        assert_eq!(data.region_id_by_name("exordium"), Some(10000027));
+        assert_eq!(
+            data.regions_by_id.get(&10000027),
+            Some(&RegionInfo {
+                id: 10000027,
+                name: "Exordium".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn missing_optional_regions_file_is_allowed() {
+        let data = load_small_fixture();
+
+        assert!(!data.has_region_name_data());
+        assert_eq!(data.region_id_by_name("Exordium"), None);
     }
 
     #[test]

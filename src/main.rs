@@ -18,6 +18,9 @@ use eve_ded_route::model::route::{GeneratedRoute, RouteMode};
 use eve_ded_route::model::system::SolarSystem;
 use eve_ded_route::output;
 use eve_ded_route::routing::candidate_filter::filter_candidates_with_route_history;
+use eve_ded_route::routing::config_resolution::{
+    apply_resolved_avoidance_to_config, resolve_avoidance, validate_start_not_avoided,
+};
 use eve_ded_route::routing::generator::{generate_all_modes, generate_route};
 
 const HIGH_SEC_START_MINIMUM: f32 = 0.45;
@@ -38,7 +41,7 @@ async fn main() -> anyhow::Result<()> {
 }
 
 async fn run_generate(config: AppConfig, options: CliOptions) -> Result<()> {
-    let config = config.with_cli_overrides(&options);
+    let mut config = config.with_cli_overrides(&options);
     validate_push_configuration_if_requested(&config)?;
 
     let sde_path = config.data.sde_path.as_deref().context(
@@ -53,12 +56,22 @@ async fn run_generate(config: AppConfig, options: CliOptions) -> Result<()> {
         "loaded SDE data"
     );
 
+    let avoidance = resolve_avoidance(&config, &sde_data)?;
     let start_system = resolve_start_system(&config, &options, &sde_data).await?;
+    validate_start_not_avoided(&config, start_system, &avoidance)?;
+    apply_resolved_avoidance_to_config(&mut config, &avoidance);
     let start_name = start_system.name.clone();
     let start_system_id = start_system.id;
 
     let graph = build_highsec_graph(
-        sde_data.systems.values().cloned(),
+        sde_data
+            .systems
+            .values()
+            .filter(|system| {
+                !avoidance.system_ids.contains(&system.id)
+                    && !avoidance.region_ids.contains(&system.region_id)
+            })
+            .cloned(),
         sde_data.stargate_connections.clone(),
         config.filter.min_security_status,
     );
