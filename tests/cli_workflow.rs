@@ -330,6 +330,10 @@ fn generate_help_includes_safety_wording() {
     assert!(text.contains("public ESI activity data"));
     assert!(text.contains("static/local SDE data"));
     assert!(text.contains("does not scan live anomalies"));
+    assert!(text.contains("parse probe scanner results"));
+    assert!(text.contains("automate the EVE UI"));
+    assert!(text.contains("click in-client"));
+    assert!(text.contains("interact with the EVE client process"));
 }
 
 #[test]

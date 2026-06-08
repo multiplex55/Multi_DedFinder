@@ -474,6 +474,64 @@ allow_stale_activity_cache = true
     }
 
     #[test]
+    fn readme_complete_config_example_parses() {
+        let readme = include_str!("../README.md");
+        let config_toml = readme
+            .split("```toml")
+            .nth(1)
+            .and_then(|rest| rest.split("```").next())
+            .expect("README should contain a TOML config example");
+
+        let config = AppConfig::from_toml_str(config_toml).expect("README config should parse");
+
+        assert_eq!(config.start.source, StartSource::CharacterLocation);
+        assert_eq!(config.character.id, Some(123456789));
+        assert_eq!(config.character.name.as_deref(), Some("Config Pilot"));
+        assert_eq!(
+            config.data.sde_path.as_deref(),
+            Some(Path::new("./data/sde"))
+        );
+        assert_eq!(
+            config.route.output_path.as_deref(),
+            Some(Path::new("./routes/route.txt"))
+        );
+        assert_eq!(
+            config.route.json_path.as_deref(),
+            Some(Path::new("./routes/route.json"))
+        );
+        assert!(!config.route.push_waypoints);
+        assert!(config.route.route_history_enabled);
+        assert_eq!(config.filter.max_jumps_last_hour, Some(80));
+        assert_eq!(config.filter.max_npc_kills_last_hour, Some(250));
+        assert_eq!(config.filter.max_ship_kills_last_hour, Some(25));
+        assert_eq!(config.filter.max_pod_kills_last_hour, Some(10));
+        assert_eq!(
+            config.filter.trade_hub_behavior,
+            FilterBehavior::SoftPenalty
+        );
+        assert_eq!(config.avoid.regions, vec!["Pochven"]);
+        assert_eq!(config.avoid.region_ids, vec![10000070]);
+        assert_eq!(config.weights.activity, 1.0);
+        assert_eq!(
+            config.faction_space.behavior,
+            FactionSpaceBehavior::SoftBonus
+        );
+        assert_eq!(
+            config.faction_space.exclude_behavior,
+            FactionExcludeBehavior::CandidateOnly
+        );
+        assert!(config.faction_space.factions.contains_key("gallente"));
+        assert!(config
+            .esi
+            .scopes
+            .contains(&"esi-ui.write_waypoint.v1".to_string()));
+        assert!(config
+            .esi
+            .scopes
+            .contains(&"esi-location.read_location.v1".to_string()));
+    }
+
+    #[test]
     fn cli_values_override_config_file_values() {
         let config = AppConfig::from_toml_str(
             r#"
