@@ -37,7 +37,7 @@ async fn main() -> anyhow::Result<()> {
 
 async fn run_generate(config: AppConfig, options: CliOptions) -> Result<()> {
     let config = config.with_cli_overrides(&options);
-    validate_push_configuration_if_requested(&config, &options)?;
+    validate_push_configuration_if_requested(&config)?;
 
     let sde_path = config.data.sde_path.as_deref().context(
         "SDE file missing: generate requires --sde-path or [data].sde_path pointing to prepared systems/stargates files",
@@ -238,10 +238,7 @@ async fn push_route_from_options(
     options: &CliOptions,
     route: &GeneratedRoute,
 ) -> Result<()> {
-    let character_id = options
-        .character_id
-        .context("--character-id is required when pushing waypoints")?;
-    let character = Character::new(character_id, options.character_name.clone());
+    let character = character_for_push(config)?;
     let push_options = PushOptions {
         dry_run: options.dry_run.unwrap_or(false),
         yes: options.yes.unwrap_or(false),
@@ -250,16 +247,25 @@ async fn push_route_from_options(
     Ok(())
 }
 
-fn validate_push_configuration_if_requested(
-    config: &AppConfig,
-    options: &CliOptions,
-) -> Result<()> {
+fn character_id_for_push(config: &AppConfig) -> Result<i64> {
+    config
+        .character
+        .id
+        .context("pushing waypoints requires a character ID; set --character-id or [character].id")
+}
+
+fn character_for_push(config: &AppConfig) -> Result<Character> {
+    Ok(Character::new(
+        character_id_for_push(config)?,
+        config.character.name.clone(),
+    ))
+}
+
+fn validate_push_configuration_if_requested(config: &AppConfig) -> Result<()> {
     if !config.route.push_waypoints {
         return Ok(());
     }
-    if options.character_id.is_none() {
-        bail!("--push-waypoints requires --character-id for ESI authentication");
-    }
+    character_id_for_push(config)?;
     if config.esi.client_id.is_none() {
         bail!("--push-waypoints requires ESI config: set [esi].client_id before authentication");
     }

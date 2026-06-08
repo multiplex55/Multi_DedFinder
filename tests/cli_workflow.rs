@@ -51,6 +51,98 @@ fn write_lowsec_start_sde(root: &Path) -> PathBuf {
     sde
 }
 
+fn write_push_config(root: &Path, character_id: Option<i64>) -> PathBuf {
+    let config = root.join("push-config.toml");
+    let character_section = character_id
+        .map(|id| format!("\n[character]\nid = {id}\nname = \"Config Pilot\"\n"))
+        .unwrap_or_default();
+    fs::write(
+        &config,
+        format!(
+            r#"
+[esi]
+client_id = "test-client"
+scopes = ["esi-ui.write_waypoint.v1"]
+{character_section}
+"#
+        ),
+    )
+    .unwrap();
+    config
+}
+
+fn write_route_json(root: &Path) -> PathBuf {
+    let route = root.join("route.json");
+    fs::write(
+        &route,
+        r#"{
+  "start_system": "Start",
+  "start_system_id": 100,
+  "mode": "dense_quiet",
+  "highsec_only": true,
+  "total_jumps": 1,
+  "average_score": 1.0,
+  "activity_timestamp": "2026-06-07T00:00:00Z",
+  "config_used": {},
+  "waypoints": [
+    {
+      "order": 1,
+      "system_id": 101,
+      "system_name": "One",
+      "security_status": 0.8,
+      "region_id": 1,
+      "constellation_id": 10,
+      "score": 1.0,
+      "jumps_last_hour": 0,
+      "npc_kills_last_hour": 0,
+      "ship_kills_last_hour": 0,
+      "pod_kills_last_hour": 0,
+      "distance_from_start": 1,
+      "score_breakdown": {
+        "activity": 0.0,
+        "distance": 0.0,
+        "security": 0.0,
+        "jump_score": 0.0,
+        "npc_score": 0.0,
+        "danger_score": 0.0,
+        "cluster_density_score": 0.0,
+        "hub_distance_score": 0.0,
+        "dead_end_penalty": 0.0,
+        "reuse_penalty": 0.0,
+        "total": 1.0
+      }
+    }
+  ],
+  "legs": []
+}
+"#,
+    )
+    .unwrap();
+    route
+}
+
+fn write_token(root: &Path, character_id: i64) -> PathBuf {
+    let config_home = root.join("xdg-config-home");
+    let token_dir = config_home.join("eve-ded-route");
+    fs::create_dir_all(&token_dir).unwrap();
+    fs::write(
+        token_dir.join("esi-token.json"),
+        format!(
+            r#"{{
+  "access_token": "access-token",
+  "refresh_token": "refresh-token",
+  "expires_at": 32503680000,
+  "character_id": {character_id},
+  "character_name": "Token Pilot",
+  "scopes": ["esi-ui.write_waypoint.v1"]
+}}
+"#
+        ),
+    )
+    .unwrap();
+    config_home
+}
+
 fn write_activity_cache(root: &Path) -> PathBuf {
     let cache = root.join("activity.json");
     fs::write(
@@ -114,6 +206,14 @@ activity_cache_minutes = 60
 
 fn run(args: &[&str]) -> Output {
     Command::new(bin()).args(args).output().unwrap()
+}
+
+fn run_with_xdg_config_home(args: &[&str], xdg_config_home: &Path) -> Output {
+    Command::new(bin())
+        .env("XDG_CONFIG_HOME", xdg_config_home)
+        .args(args)
+        .output()
+        .unwrap()
 }
 
 fn combined_output(output: &Output) -> String {
@@ -190,6 +290,73 @@ fn all_three_modes_generation_returns_three_route_outputs() {
     assert!(summary.contains("ultra_quiet summary"));
     assert!(summary.contains("dense_quiet summary"));
     assert!(summary.contains("sweep summary"));
+}
+
+#[test]
+fn push_validation_requires_cli_or_config_character_id() {
+    let root = temp_dir("push-missing-character-id");
+    let sde = write_highsec_sde(&root);
+    let cache = write_activity_cache(&root);
+    let config = write_config(&root, &sde, &cache, "Start");
+
+    let output = run(&[
+        "--config",
+        config.to_str().unwrap(),
+        "generate",
+        "--push-waypoints",
+    ]);
+
+    assert!(!output.status.success());
+    let text = combined_output(&output);
+    assert!(text.contains("pushing waypoints requires a character ID"));
+    assert!(text.contains("--character-id"));
+    assert!(text.contains("[character].id"));
+}
+
+#[test]
+fn push_uses_config_character_id_when_cli_omits_character_id() {
+    let root = temp_dir("push-config-character-id");
+    let config = write_push_config(&root, Some(123456789));
+    let route = write_route_json(&root);
+    let xdg_config_home = write_token(&root, 123456789);
+
+    let output = run_with_xdg_config_home(
+        &[
+            "--config",
+            config.to_str().unwrap(),
+            "push",
+            "--json",
+            route.to_str().unwrap(),
+            "--dry-run",
+        ],
+        &xdg_config_home,
+    );
+
+    assert!(output.status.success(), "{}", combined_output(&output));
+}
+
+#[test]
+fn cli_character_id_wins_over_config_character_id_for_push() {
+    let root = temp_dir("push-cli-character-id-wins");
+    let config = write_push_config(&root, Some(111));
+    let route = write_route_json(&root);
+    let xdg_config_home = write_token(&root, 222);
+
+    let output = run_with_xdg_config_home(
+        &[
+            "--config",
+            config.to_str().unwrap(),
+            "push",
+            "--json",
+            route.to_str().unwrap(),
+            "--character-id",
+            "222",
+            "--dry-run",
+        ],
+        &xdg_config_home,
+    );
+
+    assert!(output.status.success(), "{}", combined_output(&output));
 }
 
 #[test]
