@@ -7,6 +7,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::model::route::{GeneratedRoute, RouteMode};
+use crate::output::ensure_parent_dir;
 
 pub const DEFAULT_ROUTE_HISTORY_PATH: &str = "routes/history.json";
 pub const ROUTE_HISTORY_VERSION: u8 = 1;
@@ -86,14 +87,7 @@ pub fn load_route_history(path: &Path) -> Result<RouteHistory> {
 }
 
 pub fn save_route_history(path: &Path, generated_route: &GeneratedRoute) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).with_context(|| {
-            format!(
-                "failed to create route history directory {}",
-                parent.display()
-            )
-        })?;
-    }
+    ensure_parent_dir(path)?;
 
     let history = RouteHistory {
         version: ROUTE_HISTORY_VERSION,

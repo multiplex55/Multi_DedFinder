@@ -8,6 +8,7 @@ use anyhow::{bail, Result};
 use crate::config::AppConfig;
 use crate::model::route::{GeneratedRoute, RouteWaypoint};
 use crate::model::score::ScoreBreakdown;
+use crate::output::ensure_parent_dir;
 
 const TITLE: &str = "Quiet High-Sec DED Route";
 const FORBIDDEN_OUTPUT_CLAIMS: [&str; 3] =
@@ -105,7 +106,9 @@ pub fn render_routes(routes: &[GeneratedRoute]) -> Result<String> {
 }
 
 pub fn write_routes(routes: &[GeneratedRoute], path: impl AsRef<Path>) -> Result<()> {
+    let path = path.as_ref();
     let rendered = render_routes(routes)?;
+    ensure_parent_dir(path)?;
     fs::write(path, rendered)?;
     Ok(())
 }
@@ -117,7 +120,9 @@ pub fn print_routes(routes: &[GeneratedRoute]) -> Result<()> {
 }
 
 pub fn write_route(route: &GeneratedRoute, path: impl AsRef<Path>) -> Result<()> {
+    let path = path.as_ref();
     let rendered = render_route(route)?;
+    ensure_parent_dir(path)?;
     fs::write(path, rendered)?;
     Ok(())
 }
@@ -234,6 +239,8 @@ fn value_to_summary(value: &serde_json::Value) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use chrono::{TimeZone, Utc};
     use serde_json::json;
 
@@ -254,6 +261,17 @@ mod tests {
             reuse_penalty: 0.1,
             total: 0.75,
         }
+    }
+
+    fn nested_output_path(test_name: &str) -> std::path::PathBuf {
+        std::env::temp_dir()
+            .join(format!(
+                "eve-ded-text-output-{test_name}-{}-{}",
+                std::process::id(),
+                Utc::now().timestamp_nanos_opt().unwrap()
+            ))
+            .join("nested")
+            .join("route.txt")
     }
 
     fn route() -> GeneratedRoute {
@@ -297,6 +315,34 @@ mod tests {
                 ],
             }],
         }
+    }
+
+    #[test]
+    fn write_route_creates_nested_parent_and_writes_file() {
+        let path = nested_output_path("single");
+
+        write_route(&route(), &path).expect("route should write to nested output path");
+
+        assert!(path.parent().unwrap().exists());
+        let contents = fs::read_to_string(&path).expect("route output should be readable");
+        assert!(contents.contains("Quiet High-Sec DED Route"));
+        assert!(contents.contains("Start system: Start (30000001)"));
+
+        let _ = fs::remove_dir_all(path.parent().unwrap().parent().unwrap());
+    }
+
+    #[test]
+    fn write_routes_creates_nested_parent_and_writes_file() {
+        let path = nested_output_path("multiple");
+
+        write_routes(&[route()], &path).expect("routes should write to nested output path");
+
+        assert!(path.parent().unwrap().exists());
+        let contents = fs::read_to_string(&path).expect("routes output should be readable");
+        assert!(contents.contains("Quiet High-Sec DED Route - all modes"));
+        assert!(contents.contains("Routes generated: 1"));
+
+        let _ = fs::remove_dir_all(path.parent().unwrap().parent().unwrap());
     }
 
     #[test]
