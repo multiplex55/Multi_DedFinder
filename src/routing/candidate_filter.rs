@@ -37,6 +37,12 @@ pub fn filter_candidates_with_route_history(
     let reachable = graph.reachable_systems_from(start_system_id);
     let avoid_system_ids = resolve_system_names(graph, &config.avoid.systems);
     let trade_hub_ids = resolve_system_names(graph, &config.filter.trade_hubs);
+    let avoided_region_ids = config
+        .avoid
+        .region_ids
+        .iter()
+        .copied()
+        .collect::<HashSet<_>>();
     let max_distance = config
         .filter
         .max_distance_from_start
@@ -46,7 +52,10 @@ pub fn filter_candidates_with_route_history(
         .systems
         .values()
         .filter_map(|system| {
-            if !reachable.contains(&system.id) || avoid_system_ids.contains(&system.id) {
+            if !reachable.contains(&system.id)
+                || avoid_system_ids.contains(&system.id)
+                || avoided_region_ids.contains(&system.region_id)
+            {
                 return None;
             }
 
@@ -307,6 +316,41 @@ mod tests {
         let candidates = filter_candidates(&graph, 1, &HashMap::new(), &config);
 
         assert!(!ids(&candidates).contains(&2));
+    }
+
+    #[test]
+    fn avoid_region_ids_exclude_all_systems_in_region_from_candidates() {
+        let graph = build_highsec_graph(
+            vec![
+                SolarSystem {
+                    region_id: 10,
+                    ..system(1, "Start")
+                },
+                SolarSystem {
+                    region_id: 20,
+                    ..system(2, "Blocked One")
+                },
+                SolarSystem {
+                    region_id: 20,
+                    ..system(3, "Blocked Two")
+                },
+                SolarSystem {
+                    region_id: 30,
+                    ..system(4, "Allowed")
+                },
+            ],
+            vec![gate(1, 2), gate(2, 3), gate(1, 4)],
+            0.45,
+        );
+        let mut config = config();
+        config.avoid.region_ids = vec![20];
+
+        let candidates = filter_candidates(&graph, 1, &HashMap::new(), &config);
+        let candidate_ids = ids(&candidates);
+
+        assert!(!candidate_ids.contains(&2));
+        assert!(!candidate_ids.contains(&3));
+        assert!(candidate_ids.contains(&4));
     }
 
     #[test]
