@@ -67,12 +67,21 @@ impl EsiAuthConfig {
         callback_url: Option<String>,
         scopes: Vec<String>,
     ) -> Result<Self> {
+        Self::new_with_required_scopes(client_id, callback_url, scopes, &[WAYPOINT_SCOPE])
+    }
+
+    pub fn new_with_required_scopes(
+        client_id: impl Into<String>,
+        callback_url: Option<String>,
+        scopes: Vec<String>,
+        required_scopes: &[&str],
+    ) -> Result<Self> {
         let client_id = client_id.into();
         if client_id.trim().is_empty() {
-            bail!("[esi].client_id is required for waypoint push authentication");
+            bail!("[esi].client_id is required for ESI authentication");
         }
         let callback_url = callback_url.unwrap_or_else(|| DEFAULT_CALLBACK_URL.to_string());
-        let scopes = ensure_waypoint_scope(scopes);
+        let scopes = ensure_required_scopes(scopes, required_scopes);
         Ok(Self {
             client_id,
             callback_url,
@@ -82,9 +91,15 @@ impl EsiAuthConfig {
     }
 }
 
-pub fn ensure_waypoint_scope(mut scopes: Vec<String>) -> Vec<String> {
-    if !scopes.iter().any(|scope| scope == WAYPOINT_SCOPE) {
-        scopes.push(WAYPOINT_SCOPE.to_string());
+pub fn ensure_waypoint_scope(scopes: Vec<String>) -> Vec<String> {
+    ensure_required_scopes(scopes, &[WAYPOINT_SCOPE])
+}
+
+pub fn ensure_required_scopes(mut scopes: Vec<String>, required_scopes: &[&str]) -> Vec<String> {
+    for required_scope in required_scopes {
+        if !scopes.iter().any(|scope| scope == required_scope) {
+            scopes.push((*required_scope).to_string());
+        }
     }
     scopes
 }

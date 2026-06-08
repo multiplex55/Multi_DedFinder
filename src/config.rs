@@ -25,6 +25,16 @@ pub struct AppConfig {
 #[serde(default)]
 pub struct StartConfig {
     pub system: Option<String>,
+    pub source: StartSource,
+    pub fallback_to_config_system: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StartSource {
+    #[default]
+    Config,
+    CharacterLocation,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
@@ -138,6 +148,7 @@ impl AppConfig {
     pub fn with_cli_overrides(mut self, cli: &CliOptions) -> Self {
         if let Some(start) = &cli.start {
             self.start.system = Some(start.clone());
+            self.start.source = StartSource::Config;
         }
         if let Some(sde_path) = &cli.sde_path {
             self.data.sde_path = Some(sde_path.clone());
@@ -293,6 +304,8 @@ mod tests {
         assert!(!config.route.ignore_malformed_route_history);
         assert!(config.character.id.is_none());
         assert!(config.character.name.is_none());
+        assert_eq!(config.start.source, StartSource::Config);
+        assert!(!config.start.fallback_to_config_system);
     }
 
     #[test]
@@ -316,6 +329,8 @@ name = "Multi Scolopendra"
             r#"
 [start]
 system = "Jita"
+source = "character_location"
+fallback_to_config_system = true
 
 [data]
 sde_path = "tests/fixtures/sde"
@@ -358,6 +373,8 @@ allow_stale_activity_cache = true
         .expect("config should parse");
 
         assert_eq!(config.start.system.as_deref(), Some("Jita"));
+        assert_eq!(config.start.source, StartSource::CharacterLocation);
+        assert!(config.start.fallback_to_config_system);
         assert_eq!(
             config.data.sde_path.as_deref(),
             Some(Path::new("tests/fixtures/sde"))
@@ -395,6 +412,7 @@ allow_stale_activity_cache = true
             r#"
 [start]
 system = "Amarr"
+source = "character_location"
 
 [route]
 waypoint_count = 10
@@ -436,6 +454,7 @@ name = "Config Pilot"
         let merged = config.with_cli_overrides(&cli);
 
         assert_eq!(merged.start.system.as_deref(), Some("Jita"));
+        assert_eq!(merged.start.source, StartSource::Config);
         assert_eq!(merged.data.sde_path.as_deref(), Some(Path::new("/tmp/sde")));
         assert_eq!(merged.route.waypoint_count, 30);
         assert_eq!(merged.route.max_distance, Some(50));

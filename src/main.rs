@@ -5,15 +5,17 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context, Result};
 use clap::Parser;
 use eve_ded_route::cli::{Cli, CliOptions, Commands};
-use eve_ded_route::config::AppConfig;
+use eve_ded_route::config::{AppConfig, StartSource};
 use eve_ded_route::data::cache::load_system_activity;
 use eve_ded_route::data::route_history::{load_route_history, save_route_history};
 use eve_ded_route::data::sde::SdeData;
 use eve_ded_route::esi;
-use eve_ded_route::esi::auth::Character;
+use eve_ded_route::esi::auth::{Character, EsiAuthConfig};
+use eve_ded_route::esi::location::LOCATION_SCOPE;
 use eve_ded_route::esi::waypoint::PushOptions;
 use eve_ded_route::graph::highsec_graph::build_highsec_graph;
 use eve_ded_route::model::route::{GeneratedRoute, RouteMode};
+use eve_ded_route::model::system::SolarSystem;
 use eve_ded_route::output;
 use eve_ded_route::routing::candidate_filter::filter_candidates_with_route_history;
 use eve_ded_route::routing::generator::{generate_all_modes, generate_route};
@@ -51,21 +53,8 @@ async fn run_generate(config: AppConfig, options: CliOptions) -> Result<()> {
         "loaded SDE data"
     );
 
-    let start_name = config
-        .start
-        .system
-        .as_deref()
-        .context("generate requires a start system name (--start or [start].system)")?;
-    let start_system = sde_data.system_by_name(start_name).with_context(|| {
-        format!("start system not found: {start_name:?} was not found in SDE data")
-    })?;
-    if start_system.security_status < HIGH_SEC_START_MINIMUM {
-        bail!(
-            "start system not high-sec: {start_name:?} has security status {:.3}, below required high-sec minimum {:.2}",
-            start_system.security_status,
-            HIGH_SEC_START_MINIMUM
-        );
-    }
+    let start_system = resolve_start_system(&config, &options, &sde_data).await?;
+    let start_name = start_system.name.clone();
     let start_system_id = start_system.id;
 
     let graph = build_highsec_graph(
@@ -137,6 +126,121 @@ async fn run_generate(config: AppConfig, options: CliOptions) -> Result<()> {
             .context("failed to push generated waypoints")?;
     }
 
+    Ok(())
+}
+
+async fn resolve_start_system<'a>(
+    config: &AppConfig,
+    options: &CliOptions,
+    sde_data: &'a SdeData,
+) -> Result<&'a SolarSystem> {
+    resolve_start_system_with_location_fetcher(
+        config,
+        options,
+        sde_data,
+        |character_id, access_token| async move {
+            esi::location::get_character_location(character_id, &access_token).await
+        },
+    )
+    .await
+}
+
+async fn resolve_start_system_with_location_fetcher<'a, Fetch, Fut>(
+    config: &AppConfig,
+    options: &CliOptions,
+    sde_data: &'a SdeData,
+    fetch_location: Fetch,
+) -> Result<&'a SolarSystem>
+where
+    Fetch: FnOnce(i64, String) -> Fut,
+    Fut: std::future::Future<Output = Result<esi::location::CharacterLocation>>,
+{
+    if options.start.is_some() || config.start.source == StartSource::Config {
+        return resolve_configured_start_system(config, sde_data);
+    }
+
+    match config.start.source {
+        StartSource::Config => resolve_configured_start_system(config, sde_data),
+        StartSource::CharacterLocation => {
+            match resolve_character_location_start_system(config, sde_data, fetch_location).await {
+                Ok(system) => Ok(system),
+                Err(error) if config.start.fallback_to_config_system => {
+                    tracing::warn!(error = %error, "falling back to configured start system after character-location start resolution failed");
+                    resolve_configured_start_system(config, sde_data)
+                        .context("character-location start resolution failed and configured start fallback also failed")
+                }
+                Err(error) => Err(error),
+            }
+        }
+    }
+}
+
+async fn resolve_character_location_start_system<'a, Fetch, Fut>(
+    config: &AppConfig,
+    sde_data: &'a SdeData,
+    fetch_location: Fetch,
+) -> Result<&'a SolarSystem>
+where
+    Fetch: FnOnce(i64, String) -> Fut,
+    Fut: std::future::Future<Output = Result<esi::location::CharacterLocation>>,
+{
+    let character_id = config.character.id.context(
+        "character-location start requires a character ID; set --character-id or [character].id",
+    )?;
+    let client_id = config.esi.client_id.clone().context(
+        "character-location start requires ESI config: set [esi].client_id before authentication",
+    )?;
+    let character = Character::new(character_id, config.character.name.clone());
+    let required_scopes = if config.route.push_waypoints {
+        vec![LOCATION_SCOPE, eve_ded_route::esi::auth::WAYPOINT_SCOPE]
+    } else {
+        vec![LOCATION_SCOPE]
+    };
+    let auth_config = EsiAuthConfig::new_with_required_scopes(
+        client_id,
+        config.esi.callback_url.clone(),
+        config.esi.scopes.clone(),
+        &required_scopes,
+    )?;
+    let token = esi::location::token_for_location(&auth_config, &character).await?;
+    let location = fetch_location(character_id, token.access_token.clone())
+        .await
+        .context("failed to fetch authenticated character location from ESI")?;
+    resolve_location_system(location.solar_system_id, sde_data)
+}
+
+fn resolve_configured_start_system<'a>(
+    config: &AppConfig,
+    sde_data: &'a SdeData,
+) -> Result<&'a SolarSystem> {
+    let start_name = config
+        .start
+        .system
+        .as_deref()
+        .context("generate requires a start system name (--start or [start].system)")?;
+    let start_system = sde_data.system_by_name(start_name).with_context(|| {
+        format!("start system not found: {start_name:?} was not found in SDE data")
+    })?;
+    validate_highsec_start(start_system, start_name)?;
+    Ok(start_system)
+}
+
+fn resolve_location_system(system_id: i32, sde_data: &SdeData) -> Result<&SolarSystem> {
+    let system = sde_data.systems.get(&system_id).with_context(|| {
+        format!("current-location start system ID {system_id} was not found in SDE data")
+    })?;
+    validate_highsec_start(system, &system.name)?;
+    Ok(system)
+}
+
+fn validate_highsec_start(start_system: &SolarSystem, start_name: &str) -> Result<()> {
+    if start_system.security_status < HIGH_SEC_START_MINIMUM {
+        bail!(
+            "start system not high-sec: {start_name:?} has security status {:.3}, below required high-sec minimum {:.2}",
+            start_system.security_status,
+            HIGH_SEC_START_MINIMUM
+        );
+    }
     Ok(())
 }
 
@@ -380,6 +484,124 @@ mod tests {
     fn write_route(path: &Path, route: &GeneratedRoute) {
         let contents = serde_json::to_string(route).expect("route should serialize");
         fs::write(path, contents).expect("route JSON should be written");
+    }
+
+    fn write_test_sde(systems: &str) -> SdeData {
+        let systems_path = temp_route_path("systems.csv");
+        let stargates_path = systems_path.with_file_name("stargates.csv");
+        fs::write(&systems_path, systems).expect("systems CSV should be written");
+        fs::write(
+            &stargates_path,
+            "from_system_id,to_system_id\n100,101\n101,102\n",
+        )
+        .expect("stargates CSV should be written");
+        SdeData::load_from_files(&systems_path, &stargates_path).expect("test SDE should load")
+    }
+
+    fn highsec_test_sde() -> SdeData {
+        write_test_sde(
+            "system_id,system_name,security_status,region_id,constellation_id\n100,Start,0.9,1,10\n101,Current,0.8,1,10\n102,Other,0.7,1,10\n",
+        )
+    }
+
+    #[test]
+    fn current_location_solar_system_id_maps_to_sde_system() {
+        let sde_data = highsec_test_sde();
+
+        let system = resolve_location_system(101, &sde_data)
+            .expect("current location should map to SDE system");
+
+        assert_eq!(system.name, "Current");
+        assert_eq!(system.id, 101);
+    }
+
+    #[test]
+    fn lowsec_current_location_returns_highsec_validation_error() {
+        let sde_data = write_test_sde(
+            "system_id,system_name,security_status,region_id,constellation_id\n100,Start,0.9,1,10\n101,Danger,0.4,1,10\n102,Other,0.7,1,10\n",
+        );
+
+        let error = resolve_location_system(101, &sde_data)
+            .expect_err("low-sec current location should fail high-sec validation");
+        let message = error.to_string();
+
+        assert!(message.contains("start system not high-sec"));
+        assert!(message.contains("0.400"));
+    }
+
+    #[test]
+    fn unknown_current_location_system_id_returns_sde_lookup_error() {
+        let sde_data = highsec_test_sde();
+
+        let error = resolve_location_system(999, &sde_data)
+            .expect_err("unknown current location should fail SDE lookup");
+
+        assert!(error
+            .to_string()
+            .contains("current-location start system ID 999 was not found in SDE data"));
+    }
+
+    #[tokio::test]
+    async fn cli_start_overrides_current_location_source() {
+        let sde_data = highsec_test_sde();
+        let mut config = AppConfig::default();
+        config.start.system = Some("Start".to_string());
+        config.start.source = StartSource::CharacterLocation;
+        let options = CliOptions {
+            start: Some("Start".to_string()),
+            ..Default::default()
+        };
+
+        let system = resolve_start_system_with_location_fetcher(
+            &config,
+            &options,
+            &sde_data,
+            |_character_id, _access_token| async {
+                anyhow::bail!("location fetch should not be used for CLI --start")
+            },
+        )
+        .await
+        .expect("CLI --start should use configured start resolution");
+
+        assert_eq!(system.name, "Start");
+    }
+
+    #[tokio::test]
+    async fn fallback_is_not_used_unless_enabled() {
+        let sde_data = highsec_test_sde();
+        let mut config = AppConfig::default();
+        config.start.system = Some("Start".to_string());
+        config.start.source = StartSource::CharacterLocation;
+        config.character.id = Some(42);
+        let options = CliOptions::default();
+
+        let error = resolve_start_system_with_location_fetcher(
+            &config,
+            &options,
+            &sde_data,
+            |_character_id, _access_token| async {
+                anyhow::bail!("location fetch should not be reached without ESI config")
+            },
+        )
+        .await
+        .expect_err("fallback should be disabled by default");
+        assert!(error
+            .to_string()
+            .contains("character-location start requires ESI config"));
+
+        config.start.fallback_to_config_system = true;
+        let system = resolve_start_system_with_location_fetcher(
+            &config,
+            &options,
+            &sde_data,
+            |_character_id, _access_token| async {
+                anyhow::bail!("location fetch should not be reached without ESI config")
+            },
+        )
+        .await
+        .expect("enabled fallback should use [start].system");
+
+        assert_eq!(system.name, "Start");
     }
 
     #[test]
