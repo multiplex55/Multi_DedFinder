@@ -19,7 +19,8 @@ use eve_ded_route::model::system::SolarSystem;
 use eve_ded_route::output;
 use eve_ded_route::routing::candidate_filter::filter_candidates_with_route_history;
 use eve_ded_route::routing::config_resolution::{
-    apply_resolved_avoidance_to_config, resolve_avoidance, validate_start_not_avoided,
+    apply_resolved_avoidance_to_config, apply_resolved_faction_space_to_config, resolve_avoidance,
+    resolve_faction_space, validate_start_not_avoided,
 };
 use eve_ded_route::routing::generator::{generate_all_modes, generate_route};
 
@@ -57,9 +58,11 @@ async fn run_generate(config: AppConfig, options: CliOptions) -> Result<()> {
     );
 
     let avoidance = resolve_avoidance(&config, &sde_data)?;
+    let faction_space = resolve_faction_space(&config, &sde_data)?;
     let start_system = resolve_start_system(&config, &options, &sde_data).await?;
     validate_start_not_avoided(&config, start_system, &avoidance)?;
     apply_resolved_avoidance_to_config(&mut config, &avoidance);
+    apply_resolved_faction_space_to_config(&mut config, &faction_space);
     let start_name = start_system.name.clone();
     let start_system_id = start_system.id;
 
@@ -70,6 +73,9 @@ async fn run_generate(config: AppConfig, options: CliOptions) -> Result<()> {
             .filter(|system| {
                 !avoidance.system_ids.contains(&system.id)
                     && !avoidance.region_ids.contains(&system.region_id)
+                    && !faction_space
+                        .excluded_graph_region_ids()
+                        .contains(&system.region_id)
             })
             .cloned(),
         sde_data.stargate_connections.clone(),
@@ -95,7 +101,7 @@ async fn run_generate(config: AppConfig, options: CliOptions) -> Result<()> {
     );
     candidates.retain(|candidate| candidate.system_id != start_system_id);
     if candidates.is_empty() {
-        bail!("high-sec graph has no reachable candidates after applying configured filters");
+        bail!("high-sec graph has no reachable candidates after applying configured faction/avoid filters and other configured filters");
     }
 
     let routes = if options.all_modes.unwrap_or(false) {
@@ -451,6 +457,7 @@ mod tests {
             hub_distance_score: 0.6,
             dead_end_penalty: 0.0,
             reuse_penalty: 0.0,
+            faction_space_bonus: 0.0,
             total: 0.9,
         }
     }

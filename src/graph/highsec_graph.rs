@@ -161,6 +161,24 @@ mod tests {
     }
 
     #[test]
+    fn hard_excluded_faction_regions_prevent_route_legs_from_crossing_them() {
+        let mut systems = vec![system(1, 0.9), system(2, 0.9), system(3, 0.9)];
+        systems[1].region_id = 20;
+        let excluded_region_ids = HashSet::from([20]);
+
+        let graph = build_highsec_graph(
+            systems
+                .into_iter()
+                .filter(|system| !excluded_region_ids.contains(&system.region_id)),
+            vec![gate(1, 2), gate(2, 3)],
+            DEFAULT_HIGHSEC_SECURITY_CUTOFF,
+        );
+
+        assert!(!graph.contains_system(2));
+        assert_eq!(graph.shortest_path_highsec_only(1, 3), None);
+    }
+
+    #[test]
     fn missing_stargate_endpoint_is_ignored() {
         let graph = build_highsec_graph(
             vec![system(1, 0.9), system(2, 0.9)],
