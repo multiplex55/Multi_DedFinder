@@ -18,6 +18,7 @@ pub struct AppConfig {
     pub weights: WeightConfig,
     pub avoid: AvoidConfig,
     pub esi: EsiConfig,
+    pub character: CharacterConfig,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
@@ -109,6 +110,13 @@ pub struct EsiConfig {
     pub allow_stale_activity_cache: bool,
 }
 
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(default)]
+pub struct CharacterConfig {
+    pub id: Option<i64>,
+    pub name: Option<String>,
+}
+
 impl AppConfig {
     pub fn from_optional_path(path: Option<&Path>) -> Result<Self> {
         match path {
@@ -158,6 +166,12 @@ impl AppConfig {
         }
         if let Some(prefer_loop) = cli.prefer_loop_override() {
             self.route.prefer_loop = prefer_loop;
+        }
+        if let Some(character_id) = cli.character_id {
+            self.character.id = Some(character_id);
+        }
+        if let Some(character_name) = &cli.character_name {
+            self.character.name = Some(character_name.clone());
         }
         self
     }
@@ -277,6 +291,23 @@ mod tests {
         );
         assert!(config.route.route_history_last_route_only);
         assert!(!config.route.ignore_malformed_route_history);
+        assert!(config.character.id.is_none());
+        assert!(config.character.name.is_none());
+    }
+
+    #[test]
+    fn parses_toml_character_config() {
+        let config = AppConfig::from_toml_str(
+            r#"
+[character]
+id = 123456789
+name = "Multi Scolopendra"
+"#,
+        )
+        .expect("config should parse");
+
+        assert_eq!(config.character.id, Some(123456789));
+        assert_eq!(config.character.name.as_deref(), Some("Multi Scolopendra"));
     }
 
     #[test]
@@ -375,6 +406,10 @@ prefer_loop = true
 
 [filter]
 highsec_only = false
+
+[character]
+id = 1
+name = "Config Pilot"
 "#,
         )
         .expect("config should parse");
@@ -417,6 +452,50 @@ highsec_only = false
         );
         assert!(merged.route.push_waypoints);
         assert!(!merged.route.prefer_loop);
+        assert_eq!(merged.character.id, Some(42));
+        assert_eq!(merged.character.name.as_deref(), Some("Pilot"));
+    }
+
+    #[test]
+    fn cli_character_id_overrides_config_id() {
+        let config = AppConfig::from_toml_str(
+            r#"
+[character]
+id = 123456789
+name = "Multi Scolopendra"
+"#,
+        )
+        .expect("config should parse");
+        let cli = CliOptions {
+            character_id: Some(987654321),
+            ..Default::default()
+        };
+
+        let merged = config.with_cli_overrides(&cli);
+
+        assert_eq!(merged.character.id, Some(987654321));
+        assert_eq!(merged.character.name.as_deref(), Some("Multi Scolopendra"));
+    }
+
+    #[test]
+    fn cli_character_name_overrides_config_name() {
+        let config = AppConfig::from_toml_str(
+            r#"
+[character]
+id = 123456789
+name = "Multi Scolopendra"
+"#,
+        )
+        .expect("config should parse");
+        let cli = CliOptions {
+            character_name: Some("CLI Pilot".to_string()),
+            ..Default::default()
+        };
+
+        let merged = config.with_cli_overrides(&cli);
+
+        assert_eq!(merged.character.id, Some(123456789));
+        assert_eq!(merged.character.name.as_deref(), Some("CLI Pilot"));
     }
 
     #[test]
