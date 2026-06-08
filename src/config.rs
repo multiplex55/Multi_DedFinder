@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -17,6 +18,7 @@ pub struct AppConfig {
     pub filter: FilterConfig,
     pub weights: WeightConfig,
     pub avoid: AvoidConfig,
+    pub faction_space: FactionSpaceConfig,
     pub esi: EsiConfig,
     pub character: CharacterConfig,
 }
@@ -108,6 +110,48 @@ pub struct AvoidConfig {
     pub systems: Vec<String>,
     pub regions: Vec<String>,
     pub region_ids: Vec<i32>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(default)]
+pub struct FactionSpaceConfig {
+    pub behavior: FactionSpaceBehavior,
+    pub preferred_factions: Vec<String>,
+    pub excluded_factions: Vec<String>,
+    pub soft_bonus: f32,
+    pub exclude_behavior: FactionExcludeBehavior,
+    pub factions: HashMap<String, FactionRegionConfig>,
+    #[serde(skip)]
+    pub resolved_preferred_region_ids: Vec<i32>,
+    #[serde(skip)]
+    pub resolved_excluded_candidate_only_region_ids: Vec<i32>,
+    #[serde(skip)]
+    pub resolved_excluded_hard_exclude_region_ids: Vec<i32>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(default)]
+pub struct FactionRegionConfig {
+    pub regions: Vec<String>,
+    pub region_ids: Vec<i32>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FactionSpaceBehavior {
+    #[default]
+    Disabled,
+    HardInclude,
+    SoftBonus,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FactionExcludeBehavior {
+    #[default]
+    Disabled,
+    CandidateOnly,
+    HardExclude,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -233,6 +277,22 @@ impl Default for AvoidConfig {
             systems: default_avoid_systems(),
             regions: Vec::new(),
             region_ids: Vec::new(),
+        }
+    }
+}
+
+impl Default for FactionSpaceConfig {
+    fn default() -> Self {
+        Self {
+            behavior: FactionSpaceBehavior::Disabled,
+            preferred_factions: Vec::new(),
+            excluded_factions: Vec::new(),
+            soft_bonus: 0.0,
+            exclude_behavior: FactionExcludeBehavior::Disabled,
+            factions: HashMap::new(),
+            resolved_preferred_region_ids: Vec::new(),
+            resolved_excluded_candidate_only_region_ids: Vec::new(),
+            resolved_excluded_hard_exclude_region_ids: Vec::new(),
         }
     }
 }

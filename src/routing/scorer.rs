@@ -83,6 +83,7 @@ pub fn score_system(
         hub_distance_score: hub_distance_score as f32,
         dead_end_penalty: dead_end_penalty as f32,
         reuse_penalty: reuse_penalty as f32,
+        faction_space_bonus: 0.0,
         total: score,
     };
 

@@ -259,6 +259,7 @@ mod tests {
             hub_distance_score: 0.8,
             dead_end_penalty: 0.0,
             reuse_penalty: 0.1,
+            faction_space_bonus: 0.0,
             total: 0.75,
         }
     }

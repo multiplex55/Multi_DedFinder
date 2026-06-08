@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::config::{AppConfig, FilterBehavior};
+use crate::config::{AppConfig, FactionExcludeBehavior, FactionSpaceBehavior, FilterBehavior};
 use crate::data::esi_activity::SystemActivity;
 use crate::graph::highsec_graph::HighsecGraph;
 use crate::model::score::ScoredSystem;
@@ -43,6 +43,18 @@ pub fn filter_candidates_with_route_history(
         .iter()
         .copied()
         .collect::<HashSet<_>>();
+    let preferred_faction_region_ids = config
+        .faction_space
+        .resolved_preferred_region_ids
+        .iter()
+        .copied()
+        .collect::<HashSet<_>>();
+    let excluded_faction_region_ids = config
+        .faction_space
+        .resolved_excluded_candidate_only_region_ids
+        .iter()
+        .copied()
+        .collect::<HashSet<_>>();
     let max_distance = config
         .filter
         .max_distance_from_start
@@ -55,6 +67,16 @@ pub fn filter_candidates_with_route_history(
             if !reachable.contains(&system.id)
                 || avoid_system_ids.contains(&system.id)
                 || avoided_region_ids.contains(&system.region_id)
+                || should_exclude_for_faction_include(
+                    system.region_id,
+                    config,
+                    &preferred_faction_region_ids,
+                )
+                || should_exclude_for_faction_candidate_only(
+                    system.region_id,
+                    config,
+                    &excluded_faction_region_ids,
+                )
             {
                 return None;
             }
@@ -96,12 +118,54 @@ pub fn filter_candidates_with_route_history(
                 apply_trade_hub_soft_penalty(&mut scored, config.filter.trade_hub_soft_penalty);
             }
 
+            if should_apply_faction_soft_bonus(
+                system.region_id,
+                config,
+                &preferred_faction_region_ids,
+            ) {
+                apply_faction_space_soft_bonus(&mut scored, config.faction_space.soft_bonus);
+            }
+
             Some(scored)
         })
         .collect();
 
     candidates.sort_by(|left, right| right.score.total_cmp(&left.score));
     candidates
+}
+
+fn should_exclude_for_faction_include(
+    region_id: i32,
+    config: &AppConfig,
+    preferred_region_ids: &HashSet<i32>,
+) -> bool {
+    config.faction_space.behavior == FactionSpaceBehavior::HardInclude
+        && !preferred_region_ids.contains(&region_id)
+}
+
+fn should_exclude_for_faction_candidate_only(
+    region_id: i32,
+    config: &AppConfig,
+    excluded_region_ids: &HashSet<i32>,
+) -> bool {
+    config.faction_space.exclude_behavior == FactionExcludeBehavior::CandidateOnly
+        && excluded_region_ids.contains(&region_id)
+}
+
+fn should_apply_faction_soft_bonus(
+    region_id: i32,
+    config: &AppConfig,
+    preferred_region_ids: &HashSet<i32>,
+) -> bool {
+    config.faction_space.behavior == FactionSpaceBehavior::SoftBonus
+        && preferred_region_ids.contains(&region_id)
+}
+
+fn apply_faction_space_soft_bonus(scored: &mut ScoredSystem, configured_bonus: f32) {
+    let bonus = configured_bonus.max(0.0);
+    scored.score = (scored.score + bonus).clamp(0.0, 1.0);
+    scored.score_breakdown.faction_space_bonus = bonus;
+    scored.score_breakdown.total = scored.score;
 }
 
 fn empty_activity(system_id: i32) -> SystemActivity {
@@ -199,7 +263,7 @@ fn apply_trade_hub_soft_penalty(scored: &mut ScoredSystem, configured_penalty: f
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{FilterConfig, RouteConfig};
+    use crate::config::{FactionExcludeBehavior, FactionSpaceBehavior, FilterConfig, RouteConfig};
     use crate::graph::highsec_graph::build_highsec_graph;
     use crate::model::system::{SolarSystem, StargateConnection};
 
@@ -261,6 +325,46 @@ mod tests {
         }
     }
 
+    fn faction_region_graph() -> HighsecGraph {
+        build_highsec_graph(
+            vec![
+                SolarSystem {
+                    region_id: 10,
+                    ..system(1, "Start")
+                },
+                SolarSystem {
+                    region_id: 10,
+                    ..system(2, "Preferred")
+                },
+                SolarSystem {
+                    region_id: 20,
+                    ..system(3, "Other")
+                },
+                SolarSystem {
+                    region_id: 30,
+                    ..system(4, "Excluded")
+                },
+            ],
+            vec![gate(1, 2), gate(2, 3), gate(3, 4)],
+            0.45,
+        )
+    }
+
+    fn with_resolved_preferred_regions(mut config: AppConfig, region_ids: Vec<i32>) -> AppConfig {
+        config.faction_space.resolved_preferred_region_ids = region_ids;
+        config
+    }
+
+    fn with_resolved_candidate_only_excluded_regions(
+        mut config: AppConfig,
+        region_ids: Vec<i32>,
+    ) -> AppConfig {
+        config
+            .faction_space
+            .resolved_excluded_candidate_only_region_ids = region_ids;
+        config
+    }
+
     fn activity(system_id: i32) -> SystemActivity {
         SystemActivity {
             system_id,
@@ -285,6 +389,72 @@ mod tests {
             .iter()
             .map(|candidate| candidate.system_id)
             .collect()
+    }
+
+    #[test]
+    fn hard_include_returns_only_preferred_faction_region_candidates() {
+        let graph = faction_region_graph();
+        let mut config = with_resolved_preferred_regions(config(), vec![10]);
+        config.faction_space.behavior = FactionSpaceBehavior::HardInclude;
+
+        let candidates = filter_candidates(&graph, 1, &HashMap::new(), &config);
+        let candidate_ids = ids(&candidates);
+
+        assert!(candidate_ids.contains(&2));
+        assert!(!candidate_ids.contains(&3));
+        assert!(!candidate_ids.contains(&4));
+    }
+
+    #[test]
+    fn soft_bonus_increases_preferred_region_score_without_excluding_other_regions() {
+        let graph = faction_region_graph();
+        let baseline = config();
+        let mut soft = with_resolved_preferred_regions(config(), vec![10]);
+        soft.faction_space.behavior = FactionSpaceBehavior::SoftBonus;
+        soft.faction_space.soft_bonus = 0.2;
+
+        let activity = activity_map([SystemActivity {
+            jumps_last_hour: 50,
+            npc_kills_last_hour: 50,
+            ..activity(2)
+        }]);
+        let baseline_candidates = filter_candidates(&graph, 1, &activity, &baseline);
+        let soft_candidates = filter_candidates(&graph, 1, &activity, &soft);
+
+        let baseline_preferred_score = baseline_candidates
+            .iter()
+            .find(|candidate| candidate.system_id == 2)
+            .unwrap()
+            .score;
+        let soft_preferred = soft_candidates
+            .iter()
+            .find(|candidate| candidate.system_id == 2)
+            .unwrap();
+
+        assert!(soft_preferred.score > baseline_preferred_score);
+        assert_eq!(soft_preferred.score_breakdown.faction_space_bonus, 0.2);
+        assert!(soft_candidates
+            .iter()
+            .any(|candidate| candidate.system_id == 3));
+        assert!(soft_candidates
+            .iter()
+            .any(|candidate| candidate.system_id == 4));
+    }
+
+    #[test]
+    fn candidate_only_excluded_faction_prevents_waypoints_but_allows_transit() {
+        let graph = faction_region_graph();
+        let mut config = with_resolved_candidate_only_excluded_regions(config(), vec![30]);
+        config.faction_space.exclude_behavior = FactionExcludeBehavior::CandidateOnly;
+
+        let candidates = filter_candidates(&graph, 1, &HashMap::new(), &config);
+        let candidate_ids = ids(&candidates);
+
+        assert!(!candidate_ids.contains(&4));
+        assert_eq!(
+            graph.shortest_path_highsec_only(1, 4),
+            Some(vec![1, 2, 3, 4])
+        );
     }
 
     #[test]

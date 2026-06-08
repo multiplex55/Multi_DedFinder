@@ -22,6 +22,8 @@ pub struct ScoreBreakdown {
     pub dead_end_penalty: f32,
     #[serde(default)]
     pub reuse_penalty: f32,
+    #[serde(default)]
+    pub faction_space_bonus: f32,
     pub total: f32,
 }
 
