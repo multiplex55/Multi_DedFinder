@@ -140,7 +140,12 @@ pub async fn token_for_character(
     character: &Character,
 ) -> Result<EsiToken> {
     let mut token = match load_token(&config.token_path)? {
-        Some(token) => token,
+        Some(mut token) => {
+            if enrich_token_metadata(&mut token) {
+                save_token(&config.token_path, &token)?;
+            }
+            token
+        }
         None => authenticate_interactively(config).await?,
     };
 
@@ -149,14 +154,47 @@ pub async fn token_for_character(
         save_token(&config.token_path, &token)?;
     }
 
-    validate_token(&token, character)?;
+    validate_token_with_config(&token, character, config)?;
     Ok(token)
 }
 
 pub fn validate_token(token: &EsiToken, character: &Character) -> Result<()> {
-    if !token.has_scope(WAYPOINT_SCOPE) {
+    validate_token_required_scopes(token, character, &[WAYPOINT_SCOPE], None)
+}
+
+pub fn validate_token_with_config(
+    token: &EsiToken,
+    character: &Character,
+    config: &EsiAuthConfig,
+) -> Result<()> {
+    let required_scopes: Vec<&str> = config.scopes.iter().map(String::as_str).collect();
+    validate_token_required_scopes(
+        token,
+        character,
+        &required_scopes,
+        Some(config.token_path.as_path()),
+    )
+}
+
+fn validate_token_required_scopes(
+    token: &EsiToken,
+    character: &Character,
+    required_scopes: &[&str],
+    token_path: Option<&std::path::Path>,
+) -> Result<()> {
+    let missing_scopes: Vec<&str> = required_scopes
+        .iter()
+        .copied()
+        .filter(|scope| !token.has_scope(scope))
+        .collect();
+    if !missing_scopes.is_empty() {
+        let token_path = token_path
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "<unknown>".to_string());
         bail!(
-            "ESI token is missing required scope {WAYPOINT_SCOPE}; delete the token file and authenticate again"
+            "ESI token at {token_path} is missing required scopes; actual scopes found: {:?}; missing required scopes: {:?}; delete the token file and authenticate again",
+            token.scopes,
+            missing_scopes
         );
     }
     if let Some(token_character_id) = token.character_id {
@@ -359,8 +397,25 @@ pub fn apply_jwt_claims(token: &mut EsiToken) {
         token.character_name = claims.name;
     }
     if token.scopes.is_empty() {
-        token.scopes = claims.scp.unwrap_or_default();
+        token.scopes = claims.scp.map(scope_claim_to_vec).unwrap_or_default();
     }
+}
+
+fn enrich_token_metadata(token: &mut EsiToken) -> bool {
+    let before = (
+        token.expires_at,
+        token.character_id,
+        token.character_name.clone(),
+        token.scopes.clone(),
+    );
+    apply_jwt_claims(token);
+    before
+        != (
+            token.expires_at,
+            token.character_id,
+            token.character_name.clone(),
+            token.scopes.clone(),
+        )
 }
 
 #[derive(Debug, Deserialize)]
@@ -372,7 +427,28 @@ struct JwtClaims {
     #[serde(default)]
     exp: Option<i64>,
     #[serde(default)]
-    scp: Option<Vec<String>>,
+    scp: Option<ScopeClaim>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum ScopeClaim {
+    One(String),
+    Many(Vec<String>),
+}
+
+fn scope_claim_to_vec(claim: ScopeClaim) -> Vec<String> {
+    match claim {
+        ScopeClaim::One(scope) => scope
+            .split_whitespace()
+            .filter(|scope| !scope.is_empty())
+            .map(ToString::to_string)
+            .collect(),
+        ScopeClaim::Many(scopes) => scopes
+            .into_iter()
+            .filter(|scope| !scope.is_empty())
+            .collect(),
+    }
 }
 
 fn decode_jwt_claims(access_token: &str) -> Option<JwtClaims> {
@@ -388,4 +464,135 @@ fn unix_now() -> i64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs() as i64
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn jwt_with_claims(claims: serde_json::Value) -> String {
+        let header = json!({"alg": "none", "typ": "JWT"});
+        let header = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .encode(serde_json::to_vec(&header).expect("serialize JWT header"));
+        let claims = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .encode(serde_json::to_vec(&claims).expect("serialize JWT claims"));
+        format!("{header}.{claims}.signature")
+    }
+
+    fn token_with_claims(claims: serde_json::Value) -> EsiToken {
+        EsiToken {
+            access_token: jwt_with_claims(claims),
+            refresh_token: Some("refresh-token".to_string()),
+            expires_at: None,
+            character_id: None,
+            character_name: None,
+            scopes: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn jwt_array_scp_populates_scopes() {
+        let mut token = token_with_claims(json!({"scp": [WAYPOINT_SCOPE]}));
+
+        apply_jwt_claims(&mut token);
+
+        assert_eq!(token.scopes, vec![WAYPOINT_SCOPE.to_string()]);
+    }
+
+    #[test]
+    fn jwt_string_scp_populates_scopes() {
+        let mut token = token_with_claims(json!({"scp": WAYPOINT_SCOPE}));
+
+        apply_jwt_claims(&mut token);
+
+        assert_eq!(token.scopes, vec![WAYPOINT_SCOPE.to_string()]);
+    }
+
+    #[test]
+    fn jwt_string_scp_splits_whitespace_separated_scopes() {
+        let mut token = token_with_claims(json!({
+            "scp": "esi-ui.write_waypoint.v1 esi-location.read_location.v1"
+        }));
+
+        apply_jwt_claims(&mut token);
+
+        assert_eq!(
+            token.scopes,
+            vec![
+                WAYPOINT_SCOPE.to_string(),
+                "esi-location.read_location.v1".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn jwt_sub_sets_character_id() {
+        let mut token = token_with_claims(json!({"sub": "CHARACTER:EVE:123"}));
+
+        apply_jwt_claims(&mut token);
+
+        assert_eq!(token.character_id, Some(123));
+    }
+
+    #[test]
+    fn jwt_name_sets_character_name() {
+        let mut token = token_with_claims(json!({"name": "Capsuleer Example"}));
+
+        apply_jwt_claims(&mut token);
+
+        assert_eq!(token.character_name, Some("Capsuleer Example".to_string()));
+    }
+
+    #[tokio::test]
+    async fn disk_loaded_token_with_empty_metadata_is_enriched_and_saved() {
+        let token_path = std::env::temp_dir().join(format!(
+            "eve-ded-route-token-{}-{}.json",
+            std::process::id(),
+            unix_now()
+        ));
+        let token = EsiToken {
+            access_token: jwt_with_claims(json!({
+                "exp": unix_now() + 3_600,
+                "sub": "CHARACTER:EVE:123",
+                "name": "Capsuleer Example",
+                "scp": "esi-ui.write_waypoint.v1 esi-location.read_location.v1"
+            })),
+            refresh_token: Some("refresh-token".to_string()),
+            expires_at: None,
+            character_id: None,
+            character_name: None,
+            scopes: Vec::new(),
+        };
+        save_token(&token_path, &token).expect("save stale token fixture");
+        let config = EsiAuthConfig {
+            client_id: "client-id".to_string(),
+            callback_url: DEFAULT_CALLBACK_URL.to_string(),
+            scopes: vec![WAYPOINT_SCOPE.to_string()],
+            token_path: token_path.clone(),
+        };
+
+        let loaded = token_for_character(&config, &Character::new(123, None))
+            .await
+            .expect("load enriched token");
+        let persisted: EsiToken = serde_json::from_str(
+            &fs::read_to_string(&token_path).expect("read persisted enriched token"),
+        )
+        .expect("parse persisted enriched token");
+        let _ = fs::remove_file(&token_path);
+
+        assert_eq!(loaded.character_id, Some(123));
+        assert_eq!(persisted.character_id, Some(123));
+        assert_eq!(
+            persisted.character_name,
+            Some("Capsuleer Example".to_string())
+        );
+        assert_eq!(
+            persisted.scopes,
+            vec![
+                WAYPOINT_SCOPE.to_string(),
+                "esi-location.read_location.v1".to_string()
+            ]
+        );
+    }
 }
